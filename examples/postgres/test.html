@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>iLL example (README)</title>
+  <style>
+    body {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: monospace;
+      padding: 20px;
+    }
+    .comment { color: #6a9955; }
+    .kw { color: #569cd6; }
+    .actor { color: #4ec9b0; }
+    .type { color: #4ec9b0; }
+    .ann { color: #c586c0; }
+    .str { color: #ce9178; }
+    .num { color: #b5cea8; }
+    .prop { color: #9cdcfe; }
+    .func { color: #dcdcaa; }
+
+    /* SQL inside strings */
+    .sql-kw { color: #569cd6; font-weight: bold; }
+    .sql-ident { color: #9cdcfe; }
+    .sql-str { color: #ce9178; }
+
+    /* JSON inside ~json`...` */
+    .json-punct { color: #d4d4d4; }
+    .json-key { color: #9cdcfe; }
+    .json-string { color: #ce9178; }
+  </style>
+</head>
+<body>
+<pre>
+<span class="comment"># let's test a signup flow against an imaginary REST API with the following steps:
+# 1. start a postgres database server
+# 2. start the REST API server
+# 3. user alice signs up via a REST API
+# 4. user bob connects to the postgres server and queries via SQL to verify alice's record is there.</span>
+
+<span class="comment"># step 0: define the "actors" and their member variables up front</span>
+<span class="kw">actor</span> <span class="actor">db</span> = <span class="type">container</span>,
+  <span class="prop">image</span>: <span class="str">"postgres:18"</span>
+<span class="kw">actor</span> <span class="actor">api</span> = <span class="type">container</span>,
+  <span class="prop">file</span>: <span class="str">"./my-api.Dockerfile"</span>
+<span class="kw">actor</span> <span class="actor">alice</span> = <span class="type">http_client</span>,
+  <span class="comment"># actors can have member variables</span>
+  <span class="prop">vars</span>:
+    <span class="comment"># user_id can be set once, other actors can read it</span>
+    <span class="ann">@mut</span> once
+    <span class="ann">@access</span> read
+    <span class="prop">user_id</span>
+<span class="kw">actor</span> <span class="actor">bob</span> = <span class="type">pg_client</span>
+
+<span class="comment"># step 1: start a postgres database</span>
+<span class="kw">as</span> <span class="actor">db</span>:
+  <span class="comment"># Statements can be annotated with documentation, which is surfaced on failure</span>
+  <span class="ann">@expect</span> <span class="str">"The database needs to start before the REST server and bob's client"</span>
+  <span class="func">start</span>,
+    <span class="prop">port</span>: <span class="num">12345</span>
+    <span class="prop">env</span>:
+      <span class="prop">POSTGRES_PASSWORD</span>: <span class="str">"root"</span>
+
+<span class="comment"># step 2: start the REST API server</span>
+<span class="kw">as</span> <span class="actor">api</span>:
+  <span class="func">start</span>,
+    <span class="prop">port</span>: <span class="num">8080</span>
+    <span class="prop">env</span>:
+      <span class="prop">POSTGRES_PORT</span>: <span class="num">12345</span>
+      <span class="prop">POSTGRES_PASSWORD</span>: <span class="str">"root"</span>
+
+<span class="comment"># step 3: alice signs up via REST api</span>
+<span class="kw">as</span> <span class="actor">alice</span>:
+  <span class="comment"># sigils provide syntax highlighting and validation at interpretation (vs runtime)</span>
+  <span class="comment"># here we are using backticks, but several delimiters are supported</span>
+  <span class="func">post</span> <span class="str">"http://localhost:8080/signup"</span>,
+    <span class="prop">headers</span>:
+      <span class="str">"Content-Type"</span>: <span class="str">"application/json"</span>
+    <span class="prop">body</span>: <span class="str">~json`</span><span class="json-punct">{</span><span class="json-key">"name"</span><span class="json-punct">:</span> <span class="json-string">"alice"</span><span class="json-punct">,</span> <span class="json-key">"email"</span><span class="json-punct">:</span> <span class="json-string">"alice@example.com"</span><span class="json-punct">}</span><span class="str">`</span>
+  <span class="kw">assert</span> ok.status == <span class="num">201</span>
+  self.<span class="prop">user_id</span> = ok.json[<span class="str">"id"</span>]
+
+<span class="comment"># step 4: bob connects and verifies the API actually wrote to the database</span>
+<span class="kw">as</span> <span class="actor">bob</span>:
+  <span class="func">start</span>,
+    <span class="prop">user</span>: <span class="str">"root"</span>
+    <span class="prop">password</span>: <span class="str">"root"</span>
+    <span class="prop">port</span>: <span class="num">12345</span>
+    <span class="prop">database</span>: <span class="str">"test"</span>
+
+  <span class="ann">@expect</span> <span class="str">"Alice should be in the database, with correct name and email"</span>
+  <span class="func">query</span> <span class="str">~sql`</span><span class="sql-kw">SELECT</span> <span class="sql-ident">name</span>, <span class="sql-ident">email</span> <span class="sql-kw">FROM</span> <span class="sql-ident">users</span> <span class="sql-kw">WHERE</span> <span class="sql-ident">id</span> = ${alice.user_id}<span class="str">`</span>
+  <span class="kw">assert</span> ok.row[<span class="num">0</span>] == [<span class="str">"alice"</span>, <span class="str">"alice@example.com"</span>]
+
+</pre>
+</body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "name": "vscode-ill",
+  "displayName": "iLL — integration Logic Language",
+  "description": "Syntax highlighting for the iLL integration testing language",
+  "version": "0.1.0",
+  "publisher": "sqlync",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sqlync/ill"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "ill",
+        "aliases": ["iLL", "ill"],
+        "extensions": [".ill"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ill",
+        "scopeName": "source.ill",
+        "path": "./syntaxes/ill.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.sql": "sql",
+          "source.json": "json"
+        }
+      }
+    ]
+  }
+}

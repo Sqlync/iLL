@@ -1,0 +1,85 @@
+# assertion operators and multi-line sigils
+#
+# demonstrates all supported assertion operators:
+#   ==, !=, >, >=, <, <=, contains, !contains, matches, !matches
+
+actor db = container,
+  image: "postgres:18"
+  vars:
+    @access read
+    port: 12345
+actor alice = pg_client
+
+as db:
+  run,
+    port: self.port
+    env:
+      POSTGRES_PASSWORD: "root"
+
+as alice:
+  connect,
+    user: "root"
+    password: "root"
+    port: db.port
+    database: "test"
+
+  # multi-line sigils work naturally
+  query ~sql`
+    CREATE TABLE users (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      score INT DEFAULT 0
+    )
+  `
+
+  query ~sql`
+    INSERT INTO users (name, email, score) VALUES
+      ('alice', 'alice@example.com', 42),
+      ('bob', 'bob@example.com', 17),
+      ('charlie', 'charlie@test.org', 91)
+  `
+
+  # --- equality ---
+  query ~sql`SELECT * FROM users ORDER BY id`
+  assert ok.row_count == 3
+  assert ok.cell[0, 1] == "alice"
+
+  # --- inequality ---
+  assert ok.row_count != 0
+  assert ok.cell[0, 1] != "bob"
+
+  # --- numeric comparison ---
+  assert ok.row_count > 0
+  assert ok.row_count >= 3
+  assert ok.row_count < 100
+  assert ok.row_count <= 3
+
+  # --- contains (string) ---
+  query ~sql`SELECT email FROM users WHERE name = 'alice'`
+  assert ok.cell[0, 0] contains "example.com"
+  assert ok.cell[0, 0] !contains "test.org"
+
+  # --- contains (array) ---
+  query ~sql`SELECT name FROM users ORDER BY id`
+  assert ok.col["name"] contains "alice"
+  assert ok.col["name"] !contains "dave"
+
+  # --- matches (regex) ---
+  query ~sql`SELECT email FROM users WHERE name = 'charlie'`
+  assert ok.cell[0, 0] matches "^charlie@.+\\.org$"
+  assert ok.cell[0, 0] !matches "^alice"
+
+  # --- comparisons on query results ---
+  query ~sql`SELECT score FROM users WHERE name = 'alice'`
+  let alice_score = ok.cell[0, 0]
+  assert alice_score > 0
+  assert alice_score >= 42
+  assert alice_score <= 42
+
+  query ~sql`SELECT score FROM users WHERE name = 'bob'`
+  assert ok.cell[0, 0] < alice_score
+
+  # --- assertions on errors ---
+  query "SELEC invalid syntax here"
+  assert error.pg.reason == :syntax_error

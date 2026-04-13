@@ -1,0 +1,9 @@
+/target
+Cargo.lock
+.claude/worktrees/
+.claude/settings.local.json
+.DS_Store
+
+# tree-sitter
+tree-sitter-ill/node_modules/
+tree-sitter-ill/*.dylib

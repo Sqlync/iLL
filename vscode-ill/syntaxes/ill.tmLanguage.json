@@ -1,0 +1,275 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "iLL",
+  "scopeName": "source.ill",
+  "fileTypes": ["ill"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#annotation" },
+    { "include": "#actor-declaration" },
+    { "include": "#as-block" },
+    { "include": "#vars-block" },
+    { "include": "#statement" },
+    { "include": "#expression" }
+  ],
+  "repository": {
+
+    "comment": {
+      "name": "comment.line.number-sign.ill",
+      "match": "#.*$"
+    },
+
+    "annotation": {
+      "name": "meta.annotation.ill",
+      "match": "(@(?:access|mut|expect))(\\s+(?:[a-zA-Z_][a-zA-Z0-9_-]*|\"[^\"]*\"))?",
+      "captures": {
+        "1": { "name": "entity.name.function.decorator.ill" },
+        "2": { "name": "variable.other.ill" }
+      }
+    },
+
+    "actor-declaration": {
+      "name": "meta.actor.declaration.ill",
+      "match": "\\b(actor)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)\\s*(container|pg_client|mqtt_client|http_client)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.ill" },
+        "2": { "name": "entity.name.type.ill" },
+        "3": { "name": "keyword.operator.assignment.ill" },
+        "4": { "name": "support.type.builtin.ill" }
+      }
+    },
+
+    "as-block": {
+      "name": "meta.block.ill",
+      "match": "\\b(as)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(:)",
+      "captures": {
+        "1": { "name": "keyword.control.ill" },
+        "2": { "name": "entity.name.type.ill" },
+        "3": { "name": "punctuation.separator.ill" }
+      }
+    },
+
+    "vars-block": {
+      "name": "meta.vars.ill",
+      "begin": "^(\\s*)(vars)\\s*(:)",
+      "beginCaptures": {
+        "2": { "name": "keyword.control.ill" },
+        "3": { "name": "punctuation.separator.ill" }
+      },
+      "while": "^(?:\\1\\s+|\\s*#)",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#annotation" },
+        { "include": "#var-declaration" }
+      ]
+    },
+
+    "var-declaration": {
+      "match": "^\\s+([a-zA-Z_][a-zA-Z0-9_-]*)(?![a-zA-Z0-9_\\-:])",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.ill" }
+      }
+    },
+
+    "statement": {
+      "patterns": [
+        { "include": "#let-statement" },
+        { "include": "#assert-statement" },
+        { "include": "#command" }
+      ]
+    },
+
+    "let-statement": {
+      "name": "meta.let.ill",
+      "match": "^\\s+(let)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)",
+      "captures": {
+        "1": { "name": "keyword.control.ill" },
+        "2": { "name": "variable.other.ill" },
+        "3": { "name": "keyword.operator.assignment.ill" }
+      }
+    },
+
+    "assert-statement": {
+      "name": "meta.assert.ill",
+      "match": "^\\s+(assert)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.ill" }
+      }
+    },
+
+    "command": {
+      "comment": "First identifier on an indented line that is NOT followed by a colon. The (?![a-zA-Z0-9_-:]) lookahead prevents the regex from backtracking to a shorter match (e.g. matching 'use' in 'user:').",
+      "match": "^\\s+([a-zA-Z_][a-zA-Z0-9_-]*)(?![a-zA-Z0-9_\\-:])",
+      "captures": {
+        "1": { "name": "entity.name.function.ill" }
+      }
+    },
+
+    "expression": {
+      "patterns": [
+        { "include": "#parse-expression" },
+        { "include": "#sigil" },
+        { "include": "#double-quoted-string" },
+        { "include": "#single-quoted-string" },
+        { "include": "#atom" },
+        { "include": "#hex-number" },
+        { "include": "#number" },
+        { "include": "#boolean" },
+        { "include": "#comparison-operator" },
+        { "include": "#builtin-identifier" },
+        { "include": "#property-access" },
+        { "include": "#keyword-arg-key" }
+      ]
+    },
+
+    "parse-expression": {
+      "match": "\\b(parse)\\s+(\\S+)\\s+(as)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "1": { "name": "keyword.control.ill" },
+        "3": { "name": "keyword.control.ill" },
+        "4": { "name": "entity.name.type.ill" }
+      }
+    },
+
+    "sigil": {
+      "patterns": [
+        { "include": "#sigil-sql" },
+        { "include": "#sigil-json" }
+      ]
+    },
+
+    "sigil-sql": {
+      "name": "meta.sigil.sql.ill",
+      "begin": "(~)(sql)(`)",
+      "end": "`",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.sigil.ill" },
+        "2": { "name": "keyword.other.sigil.ill" },
+        "3": { "name": "punctuation.definition.string.begin.ill" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.ill" }
+      },
+      "patterns": [
+        { "include": "#interpolation" },
+        { "include": "source.sql" }
+      ]
+    },
+
+    "sigil-json": {
+      "name": "meta.sigil.json.ill",
+      "begin": "(~)(json)(`)",
+      "end": "`",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.sigil.ill" },
+        "2": { "name": "keyword.other.sigil.ill" },
+        "3": { "name": "punctuation.definition.string.begin.ill" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.ill" }
+      },
+      "patterns": [
+        { "include": "#interpolation" },
+        { "include": "source.json" }
+      ]
+    },
+
+    "double-quoted-string": {
+      "name": "string.quoted.double.ill",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.ill" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.ill" }
+      },
+      "patterns": [
+        { "include": "#interpolation" },
+        {
+          "name": "constant.character.escape.ill",
+          "match": "\\\\."
+        }
+      ]
+    },
+
+    "single-quoted-string": {
+      "name": "string.quoted.single.ill",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.ill" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.ill" }
+      }
+    },
+
+    "interpolation": {
+      "name": "meta.interpolation.ill",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.begin.ill" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.end.ill" }
+      },
+      "patterns": [
+        { "include": "#builtin-identifier" },
+        { "include": "#property-access" },
+        { "include": "#identifier" }
+      ]
+    },
+
+    "atom": {
+      "name": "constant.other.atom.ill",
+      "match": ":[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+
+    "hex-number": {
+      "name": "constant.numeric.hex.ill",
+      "match": "\\b0x[0-9a-fA-F]+\\b"
+    },
+
+    "number": {
+      "name": "constant.numeric.ill",
+      "match": "\\b[0-9]+\\b"
+    },
+
+    "boolean": {
+      "name": "constant.language.boolean.ill",
+      "match": "\\b(true|false)\\b"
+    },
+
+    "comparison-operator": {
+      "name": "keyword.operator.comparison.ill",
+      "match": "==|!=|>=|<=|>|<|\\b!contains\\b|\\bcontains\\b|\\b!matches\\b|\\bmatches\\b"
+    },
+
+    "builtin-identifier": {
+      "name": "variable.language.ill",
+      "match": "\\b(ok|error|self)\\b"
+    },
+
+    "property-access": {
+      "name": "meta.property-access.ill",
+      "match": "(?<=[a-zA-Z0-9_\\]])\\.([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "1": { "name": "variable.parameter.ill" }
+      }
+    },
+
+    "keyword-arg-key": {
+      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(?=:)",
+      "captures": {
+        "1": { "name": "variable.parameter.ill" }
+      }
+    },
+
+    "identifier": {
+      "name": "variable.other.ill",
+      "match": "[a-zA-Z_][a-zA-Z0-9_-]*"
+    }
+  }
+}

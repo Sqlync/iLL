@@ -1,0 +1,40 @@
+# connection failure examples
+#
+# http clients have no mode change (ex: connect/disconnect) — transport failures surface on the
+# request itself.
+#
+# the key distinction:
+#   transport failure (no response at all) → error.network
+#   non-2xx http response → error.http
+#   2xx http response → ok
+
+actor api = container,
+  file: "./api.Dockerfile"
+  vars:
+    @access read
+    base: "http://localhost:8080"
+actor alice = http_client
+
+as api:
+  run,
+    port: 8080
+
+as alice:
+  # 5xx — server answered with an error
+  get "${api.base}/broken"
+  assert error.http.status == 500
+  let err = parse error.http.body as json
+  assert err["error"] == "internal server error"
+
+  # timeout — connection accepted but server never responded
+  get "${api.base}/slow",
+    timeout: 100
+  assert error.network.reason == :timeout
+
+  # tcp-level failure — nothing listening on this port
+  get "http://localhost:9999/users"
+  assert error.network.reason == :connection_refused
+
+  # invalid url — fails before any I/O
+  get "not-a-url"
+  assert error.network.reason == :invalid_url

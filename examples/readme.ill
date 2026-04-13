@@ -1,0 +1,61 @@
+# let's test a signup flow against an imaginary REST API with the following steps: 
+# 1. start a postgres database server 
+# 2. start the REST API server
+# 3. user alice signs up via a REST API 
+# 4. user bob connects to the postgres server and queries via SQL to verify alice's record exists
+
+# step 0: define the "actors" and their member variables up front
+actor db = container,
+  image: "postgres:18"
+actor api = container,
+  file: "./my-api.Dockerfile"
+actor alice = http_client,
+  # actors can have member variables
+  vars:
+    # user_id can be set once, other actors can read it
+    @mut once
+    @access read
+    user_id
+actor bob = pg_client 
+
+# step 1: start a postgres database 
+as db:
+  # Statements can be annotated with documentation, which is surfaced on failure
+  @expect "The database needs to start before the REST server and bob's client"
+  run,
+    port: 12345
+    env:
+      POSTGRES_PASSWORD: "root"
+
+# step 2: start the REST API server
+as api:
+  run,
+    port: 8080
+    env:
+      POSTGRES_PORT: 12345
+      POSTGRES_PASSWORD: "root"
+
+# step 3: alice signs up via REST api
+as alice:
+  # sigils provide syntax highlighting and validation at interpretation (vs runtime)
+  # here we are using backticks, but several delimiters are supported
+  post "http://localhost:8080/signup",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"name": "alice", "email": "alice@example.com"}`
+  assert ok.status == 201
+  let resp = parse ok.body as json
+  self.user_id = resp["id"]
+
+# step 4: bob connects and verifies the API actually wrote to the database
+as bob:
+  connect,
+    user: "root"
+    password: "root"
+    port: 12345
+    database: "test"
+
+  @expect "Alice should be in the database, with correct name and email"
+  query ~sql`SELECT name, email FROM users WHERE id = ${alice.user_id}`
+  assert ok.row[0] == ["alice", "alice@example.com"]
+  

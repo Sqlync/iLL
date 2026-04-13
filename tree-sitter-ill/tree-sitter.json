@@ -1,0 +1,27 @@
+{
+  "grammars": [
+    {
+      "name": "ill",
+      "camelCase": false,
+      "scope": "source.ill",
+      "path": ".",
+      "file-types": ["ill"],
+      "injection-regex": "^ill$",
+      "highlights": "queries/highlights.scm",
+      "injections": "queries/injections.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "Apache-2.0",
+    "description": "Tree-sitter grammar for the iLL integration testing language",
+    "authors": [
+      {
+        "name": "SQLync"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/sqlync/tree-sitter-ill"
+    }
+  }
+}

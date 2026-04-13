@@ -1,0 +1,76 @@
+# headers example
+#
+# demonstrates request headers, authentication flows, and response header
+# assertions. this is the rest equivalent of mqtt's user_properties example.
+
+actor api = container,
+  file: "./api.Dockerfile"
+  vars:
+    @access read
+    base: "http://localhost:8080"
+actor alice = http_client
+
+as api:
+  run,
+    port: 8080
+
+as alice:
+  # login to get a token
+  post "${api.base}/auth/login",
+    headers:
+      "Accept": "application/json"
+      "Content-Type": "application/json"
+    body: ~json`{"username": "alice", "password": "secret"}`
+  assert ok.status == 200
+  let auth = parse ok.body as json
+  let token = auth["token"]
+
+  # use the token in subsequent requests
+  get "${api.base}/profile",
+    headers:
+      "Accept": "application/json"
+      "Authorization": "Bearer ${token}"
+  assert ok.status == 200
+  let profile = parse ok.body as json
+  assert profile["username"] == "alice"
+
+  # missing auth — server rejects with 401
+  get "${api.base}/profile",
+    headers:
+      "Accept": "application/json"
+  assert error.http.status == 401
+  let err = parse error.http.body as json
+  assert err["error"] == "unauthorized"
+
+  # inspect response headers — no parse needed, asserting on ok.headers directly
+  get "${api.base}/users",
+    headers:
+      "Accept": "application/json"
+      "Authorization": "Bearer ${token}"
+  assert ok.status == 200
+  assert ok.headers["Content-Type"] == "application/json"
+  assert ok.headers["X-Request-Id"] != ""
+
+  # capture a response header for use in subsequent requests
+  let trace_id = ok.headers["X-Request-Id"]
+
+  # custom headers round-trip — server echoes back what we sent
+  post "${api.base}/echo",
+    headers:
+      "Accept": "application/json"
+      "Authorization": "Bearer ${token}"
+      "Content-Type": "application/json"
+      "X-Trace-Id": trace_id
+    body: ~json`{"msg": "hello"}`
+  assert ok.status == 200
+  assert ok.headers["X-Trace-Id"] == trace_id
+
+  # nested json access — chained bracket notation
+  get "${api.base}/users/1",
+    headers:
+      "Accept": "application/json"
+      "Authorization": "Bearer ${token}"
+  assert ok.status == 200
+  let user = parse ok.body as json
+  assert user["address"]["city"] == "Portland"
+  assert user["roles"][0] == "admin"

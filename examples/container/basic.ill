@@ -1,0 +1,14 @@
+# basic container example
+#
+# demonstrates declaring a container with a pre-built image and managing its lifecycle
+
+actor nginx = container,
+  image: "nginx:latest"
+  vars:
+    @access read
+    port: 8080
+
+# run starts the container; it will auto-stop when the test ends
+as nginx:
+  run,
+    port: self.port

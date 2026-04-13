@@ -1,0 +1,80 @@
+actor db = container,
+  image: "postgres:18"
+  vars:
+    @access read
+    port: 12345
+actor admin = pg_client
+actor alice = pg_client
+actor bob = pg_client
+
+as db:
+  run,
+    port: self.port
+    env:
+      POSTGRES_PASSWORD: "root"
+
+# admin sets up the schema and row-level security policies
+as admin:
+  connect,
+    user: "root"
+    password: "root"
+    port: db.port
+    database: "test"
+
+  # create roles for alice and bob
+  query ~sql`CREATE ROLE alice LOGIN PASSWORD 'alice'`
+  query ~sql`CREATE ROLE bob LOGIN PASSWORD 'bob'`
+
+  # create a shared messages table
+  query ~sql`CREATE TABLE messages (id INT, owner TEXT DEFAULT current_user, body TEXT)`
+  query ~sql`GRANT SELECT, INSERT ON messages TO alice, bob`
+
+  # enable row-level security
+  query ~sql`ALTER TABLE messages ENABLE ROW LEVEL SECURITY`
+
+  # each user can only see their own rows
+  query ~sql`CREATE POLICY messages_select ON messages FOR SELECT USING (owner = current_user)`
+  query ~sql`CREATE POLICY messages_insert ON messages FOR INSERT WITH CHECK (owner = current_user)`
+
+# alice inserts a message
+as alice:
+  connect,
+    user: "alice"
+    password: "alice"
+    port: db.port
+    database: "test"
+
+  query ~sql`INSERT INTO messages (id, body) VALUES (1, 'secret from alice')`
+
+  # alice can see her own message
+  query ~sql`SELECT * FROM messages`
+  assert ok.row_count == 1
+  assert ok.row[0] == [1, "alice", "secret from alice"]
+
+# bob inserts a message
+as bob:
+  connect,
+    user: "bob"
+    password: "bob"
+    port: db.port
+    database: "test"
+
+  query ~sql`INSERT INTO messages (id, body) VALUES (2, 'secret from bob')`
+
+  # bob can only see his own message, not alice's
+  query ~sql`SELECT * FROM messages`
+  assert ok.row_count == 1
+  assert ok.row[0] == [2, "bob", "secret from bob"]
+
+# alice still only sees her own message
+as alice:
+  query ~sql`SELECT * FROM messages`
+  assert ok.row_count == 1
+  assert ok.row[0] == [1, "alice", "secret from alice"]
+
+# admin (table owner) can see all rows
+as admin:
+  query ~sql`SELECT * FROM messages ORDER BY id`
+  assert ok.row_count == 2
+  assert ok.row[0] == [1, "alice", "secret from alice"]
+  assert ok.row[1] == [2, "bob", "secret from bob"]

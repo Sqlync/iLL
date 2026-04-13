@@ -1,0 +1,44 @@
+# mqtt qos examples
+
+actor broker = container,
+  image: "eclipse-mosquitto"
+  vars:
+    @access read
+    port: 1883
+actor publisher = mqtt_client
+actor subscriber = mqtt_client
+
+as broker:
+  run
+
+as subscriber:
+  connect,
+    host: "localhost"
+    port: broker.port
+  subscribe_0 "events/qos0"
+  subscribe_1 "events/qos1"
+  subscribe_2 "events/qos2"
+
+as publisher:
+  connect,
+    host: "localhost"
+    port: broker.port
+
+  # qos 0 — fire and forget, no ack
+  publish_0 "events/qos0", "at most once"
+
+  # qos 1 — broker acknowledges delivery (PUBACK)
+  publish_1 "events/qos1", "at least once"
+
+  # qos 2 — exactly-once delivery (PUBREC → PUBREL → PUBCOMP)
+  publish_2 "events/qos2", "exactly once"
+
+as subscriber:
+  receive publish
+  assert ok.payload == "at most once"
+
+  receive publish
+  assert ok.payload == "at least once"
+
+  receive publish
+  assert ok.payload == "exactly once"

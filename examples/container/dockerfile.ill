@@ -1,0 +1,24 @@
+# dockerfile container example
+#
+# demonstrates a typical development flow: build your app from a local Dockerfile,
+# start it, verify it responds, and stop it
+#
+# see examples/container/languages/ for starter Dockerfiles for python, node, and rust
+
+actor app = container,
+  file: "languages/python.Dockerfile"
+  vars:
+    @access read
+    port: 8080
+actor client = http_client
+
+as app:
+  run,
+    port: self.port
+
+as client:
+  get "http://localhost:${app.port}/health"
+  assert ok.status == 200
+
+as app:
+  stop

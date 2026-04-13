@@ -1,0 +1,59 @@
+# mqtt user_properties examples
+
+actor broker = container,
+  image: "eclipse-mosquitto"
+  vars:
+    @access read
+    port: 1883
+actor publisher = mqtt_client
+actor subscriber = mqtt_client
+
+as broker:
+  run
+
+as subscriber:
+  connect,
+    host: "localhost"
+    port: broker.port
+    user_properties:
+      "app": "ill-test"
+      "client-type": "subscriber"
+
+  subscribe_0 "events",
+    user_properties:
+      "client-type": "subscriber"
+
+as publisher:
+  connect,
+    host: "localhost"
+    port: broker.port
+    user_properties:
+      "app": "ill-test"
+      "client-type": "publisher"
+
+  # publish_0 has no PUBACK, so user_properties are outgoing only — nothing on ok
+  publish_0 "events", "hello",
+    user_properties:
+      "env": "prod"
+      "version": "1"
+
+as subscriber:
+  receive publish
+  assert ok.user_properties["env"] == "prod"
+  assert ok.user_properties["version"] == "1"
+
+# user properties on CONNACK and broker-assigned client_id
+as publisher:
+  disconnect
+
+as publisher:
+  connect,
+    host: "localhost"
+    port: broker.port
+  assert ok.user_properties["server-version"] == "5.0"
+  let assigned_id = ok.assigned_client_id
+
+  subscribe_0 "status"
+  publish_0 "status", "connected as ${assigned_id}"
+  receive publish
+  assert ok.payload == "connected as ${assigned_id}"

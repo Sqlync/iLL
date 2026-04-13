@@ -1,0 +1,65 @@
+# declare actors — we'll need one for the database server, one for the database client
+actor db = container,
+  image: "postgres:18"
+  vars:
+    @access read
+    port: 12345
+actor alice = pg_client
+
+# start runs the db; it will auto-stop on test completion
+as db:
+  run,
+    port: self.port
+    env:
+      POSTGRES_PASSWORD: "root"
+
+as alice:
+  # connect inside "as" connects this actor to the db
+  connect,
+    user: "root"
+    password: "root"
+    port: db.port
+    database: "test"
+
+  # create a table and insert some rows
+  query ~sql`CREATE TABLE users (id INT, name TEXT)`
+  query ~sql`INSERT INTO users VALUES (1, 'alice')`
+  query ~sql`INSERT INTO users VALUES (2, 'bob')`
+
+  # "error" catches expected failures and allows assertions
+  # we aren't using a ~sql sigil, because we don't want to evaluate the statement
+  query "SELEC invalid"
+  assert error.pg.reason == :syntax_error
+
+  # "ok" refers to the result of a successful command
+  query ~sql`SELECT * FROM users WHERE id = 1`
+  assert ok.row[0] == [1, "alice"]
+
+  # check multiple rows
+  query ~sql`SELECT * FROM users ORDER BY id`
+  assert ok.row[0] == [1, "alice"]
+  assert ok.row[1] == [2, "bob"]
+
+  # check result set shape
+  assert ok.row_count == 2
+  assert ok.col_count == 2
+
+  # check a column by index or name (returns all values in that column)
+  assert ok.col["name"] == ["alice", "bob"]
+  assert ok.col[0] == [1, 2]
+
+  # check a specific cell
+  query ~sql`SELECT name FROM users WHERE id = 2`
+  assert ok.cell[0, 0] == "bob"
+
+  # capture a value and reuse it
+  query ~sql`SELECT id FROM users WHERE name = 'alice'`
+  let alice_id = ok.cell[0, 0]
+
+  query ~sql`SELECT * FROM users WHERE id = ${alice_id}`
+  assert ok.row[0] == [1, "alice"]
+
+  # some args are optional
+  query ~sql`SELECT * FROM users WHERE id = ${alice_id}`,
+    timeout: 5000
+  assert ok.row[0] == [1, "alice"]

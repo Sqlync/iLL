@@ -1,0 +1,43 @@
+actor api = container,
+  file: "./api.Dockerfile"
+  vars:
+    @access read
+    base: "http://localhost:8080"
+actor alice = http_client
+actor bob = http_client
+
+as api:
+  run,
+    port: 8080
+
+as alice:
+  post "${api.base}/auth/login",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"username": "alice", "password": "secret"}`
+  assert ok.status == 200
+  let auth = parse ok.body as json
+  let token = auth["token"]
+
+  get "${api.base}/profile",
+    headers:
+      "Authorization": "Bearer ${token}"
+  assert ok.status == 200
+  let profile = parse ok.body as json
+  assert profile["username"] == "alice"
+
+as bob:
+  post "${api.base}/auth/login",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"username": "bob", "password": "secret"}`
+  assert ok.status == 200
+  let auth = parse ok.body as json
+  let token = auth["token"]
+
+  get "${api.base}/profile",
+    headers:
+      "Authorization": "Bearer ${token}"
+  assert ok.status == 200
+  let profile = parse ok.body as json
+  assert profile["username"] == "bob"

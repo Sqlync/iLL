@@ -1,0 +1,40 @@
+# connection failure and CONNACK examples
+#
+# connect does the full handshake: sends CONNECT and waits for CONNACK.
+#   transport failures (wrong host/port) → error.network
+#   mqtt rejections (bad credentials, etc.) → error.mqtt
+# on success, connack fields are available directly on ok
+
+actor broker = container,
+  image: "eclipse-mosquitto"
+  vars:
+    @access read
+    port: 1883
+actor alice = mqtt_client
+
+as broker:
+  run
+
+# tcp-level failure — wrong port, no CONNACK produced
+as alice:
+  connect,
+    host: "localhost"
+    port: 9999
+  assert error.network.reason == :connection_refused
+
+# mqtt-level failure — broker rejected with CONNACK reason_code 0x87
+as alice:
+  connect,
+    host: "localhost"
+    port: broker.port
+    username: "wrong"
+    password: "wrong"
+  assert error.mqtt.reason == :not_authorized
+  assert error.mqtt.reason_code == 0x87
+
+# successful connection — connack fields available on ok
+as alice:
+  connect,
+    host: "localhost"
+    port: broker.port
+  assert ok.session_present == false

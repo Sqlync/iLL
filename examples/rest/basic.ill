@@ -1,0 +1,73 @@
+# basic rest example
+#
+# demonstrates core http interactions: crud operations, status assertions,
+# json parsing, capture and string interpolation
+#
+# http clients have no start/stop — http is stateless
+
+actor api = container,
+  file: "./api.Dockerfile"
+  vars:
+    @access read
+    base: "http://localhost:8080"
+actor alice = http_client
+
+as api:
+  run,
+    port: 8080
+
+as alice:
+  # get an existing resource
+  get "${api.base}/users/1"
+  assert ok.status == 200
+  let user = parse ok.body as json
+  assert user["id"] == 1
+  assert user["name"] == "alice"
+
+  # post to create a new resource
+  post "${api.base}/users",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"name": "bob"}`
+  assert ok.status == 201
+  let created = parse ok.body as json
+  assert created["name"] == "bob"
+
+  # capture the server-assigned id for use in subsequent requests
+  let new_id = created["id"]
+
+  get "${api.base}/users/${new_id}"
+  assert ok.status == 200
+  let fetched = parse ok.body as json
+  assert fetched["name"] == "bob"
+
+  # put to replace a resource
+  put "${api.base}/users/${new_id}",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"name": "robert"}`
+  assert ok.status == 200
+  let updated = parse ok.body as json
+  assert updated["name"] == "robert"
+
+  # delete the resource
+  delete "${api.base}/users/${new_id}"
+  assert ok.status == 204
+
+  # 404 — resource not found
+  get "${api.base}/users/${new_id}"
+  assert error.http.status == 404
+
+  # validation failure — server returns 422 with error detail
+  post "${api.base}/users",
+    headers:
+      "Content-Type": "application/json"
+    body: ~json`{"name": ""}`
+  assert error.http.status == 422
+  let err = parse error.http.body as json
+  assert err["error"] == "name is required"
+
+  # timeout — a transport-level failure, not an http response
+  get "${api.base}/slow",
+    timeout: 50
+  assert error.network.reason == :timeout

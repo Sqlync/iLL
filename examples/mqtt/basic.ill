@@ -1,0 +1,67 @@
+# basic mqtt example
+#
+# demonstrates connection, subscribe, publish, capture, error handling
+# note: only mqtt 5 clients are supported for now
+#
+# step 1: start mqtt broker
+# step 2: alice connects to broker
+# step 3: alice subscribes to a topic
+# step 4: alice publish to that topic
+# step 5: alice receives the publish
+# step 6: alice demonstrates capture and reuse
+# step 7: (error demonstration) alice publishes to an invalid topic
+# step 8: receive with an explicit timeout
+# step 9: disconnect with reason code and user properties
+
+# define the actors
+actor broker = container,
+  image: "eclipse-mosquitto"
+  vars:
+    @access read
+    port: 1883
+actor alice = mqtt_client
+
+# step 1: start the broker
+as broker:
+  run
+
+# step 2: alice connects to broker
+as alice:
+  connect,
+    host: "localhost"
+    port: broker.port
+
+  # step 3: alice subscribes to a topic (with QoS 0)
+  subscribe_0 "greetings"
+
+  # step 4: alice publish to that topic
+  publish_0 "greetings", "hello"
+
+  # step 5: alice receives the publish
+  receive publish
+  assert ok.payload == "hello"
+  assert ok.topic == "greetings"
+
+  # step 6: alice demonstrates capture and reuse
+  publish_0 "greetings", "world"
+  receive publish
+  let last_msg = ok.payload
+
+  publish_0 "greetings", "got: ${last_msg}"
+  receive publish
+  assert ok.payload == "got: world"
+
+  # step 7: (error demonstration) alice publishes to an invalid topic
+  publish_0 "", "bad topic"
+  assert error.mqtt.reason == :invalid_topic
+
+  # step 8: receive with an explicit timeout (default is 5 seconds)
+  publish_0 "greetings", "last message"
+  receive publish, timeout: 2
+  assert ok.payload == "last message"
+
+  # step 9: disconnect with reason code and user properties
+  disconnect,
+    reason_code: 0x00
+    user_properties:
+      "reason": "test complete"
