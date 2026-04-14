@@ -1,4 +1,4 @@
-# argument supplied from the commandline can be accessed by the built-in args_actor
+# arguments supplied from the commandline can be accessed by the built-in args_actor
 # this allows testing different parameters, configs, containers, etc. without modifying
 # the test file
 #
