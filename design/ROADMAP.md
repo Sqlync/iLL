@@ -16,24 +16,19 @@ Write `grammar.js`. Get it parsing all the examples. Test with `tree-sitter pars
 - [x] tree-sitter grammar.js
 - [x] All examples parse cleanly
 
-## Phase 3: AST Types
-Define the Rust data structures that represent the language semantically. Pure data, no parsing logic.
+## Phase 3: AST
+Define Rust data structures for the language and lower the tree-sitter CST into them. Commands are generic (name + args) — actor-specific knowledge lives in the validation pass, not the AST.
 
 - [ ] Core AST types (actors, statements, expressions)
-- [ ] Actor command types per actor type
-- [ ] Mode definitions per actor type
-
-## Phase 4: CST → AST Lowering
-Walk tree-sitter nodes, produce AST. This is where `actor db = postgres` becomes `ActorDecl { name: "db", ... }`.
-
 - [ ] Tree-sitter → AST lowering pass
 - [ ] All examples lower to valid ASTs
 
 ## Phase 5: Validation Pass
-Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Takes raw AST, produces errors or a validated AST.
+Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Actor-specific command and mode definitions live here, making actor types pluggable.
 
 - [ ] Name resolution (actor declarations → as block references)
-- [ ] Mode tracking and validation
+- [ ] Per-actor command validation (valid commands, required args, argument types)
+- [ ] Per-actor mode tracking (e.g. must connect before query)
 - [ ] Expression type checking
 
 ## Phase 6: Interpreter / Runtime
