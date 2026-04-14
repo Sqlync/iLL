@@ -99,25 +99,8 @@
       ]
     },
     "actor_type": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "container"
-        },
-        {
-          "type": "STRING",
-          "value": "pg_client"
-        },
-        {
-          "type": "STRING",
-          "value": "mqtt_client"
-        },
-        {
-          "type": "STRING",
-          "value": "http_client"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "identifier"
     },
     "actor_body": {
       "type": "SEQ",
