@@ -34,10 +34,10 @@ Mode checking, name resolution (does this actor exist?), type checking (is this 
 ## Phase 6: Interpreter / Runtime
 Actually execute the validated AST. Start postgres, run queries, check assertions.
 
+- [ ] Container runtime (image/dockerfile, run, lifecycle)
 - [ ] Postgres runtime (start/stop, client, queries)
 - [ ] MQTT runtime (broker, client, pub/sub)
 - [ ] REST runtime (HTTP client)
-- [ ] Bash runtime (run, start/stop daemons)
 
 ## Phase 7: LSP
 Wire tree-sitter + validation into the language server for diagnostics, completions, hover.
