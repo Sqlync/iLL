@@ -23,7 +23,7 @@ Define Rust data structures for the language and lower the tree-sitter CST into 
 - [ ] Tree-sitter → AST lowering pass
 - [ ] All examples lower to valid ASTs
 
-## Phase 5: Validation Pass
+## Phase 4: Validation Pass
 Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Actor-specific command and mode definitions live here, making actor types pluggable.
 
 - [ ] Name resolution (actor declarations → as block references)
@@ -31,7 +31,7 @@ Mode checking, name resolution (does this actor exist?), type checking (is this 
 - [ ] Per-actor mode tracking (e.g. must connect before query)
 - [ ] Expression type checking
 
-## Phase 6: Interpreter / Runtime
+## Phase 5: Interpreter / Runtime
 Actually execute the validated AST. Start postgres, run queries, check assertions.
 
 - [ ] Container runtime (image/dockerfile, run, lifecycle)
@@ -39,7 +39,7 @@ Actually execute the validated AST. Start postgres, run queries, check assertion
 - [ ] MQTT runtime (broker, client, pub/sub)
 - [ ] REST runtime (HTTP client)
 
-## Phase 7: LSP
+## Phase 6: LSP
 Wire tree-sitter + validation into the language server for diagnostics, completions, hover.
 
 - [ ] Diagnostics from validation pass

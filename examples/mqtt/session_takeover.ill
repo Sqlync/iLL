@@ -1,7 +1,7 @@
 # mqtt session takeover example
 #
 # when a new client connects with the same client_id as an existing client,
-# the broker sends DISCONNECT (reason_code 0x8E) to the existing client
+# the broker sends DISCONNECT (reason_code 142) to the existing client
 
 actor broker = container,
   image: "eclipse-mosquitto"
@@ -29,4 +29,4 @@ as client2:
 # broker kicks client1 when client2 takes the session
 as client1:
   receive disconnect
-  assert ok.reason_code == 0x8E
+  assert ok.reason_code == 142
