@@ -1,0 +1,24 @@
+# arguments supplied from the commandline can be accessed by the built-in args_actor
+# this allows testing different parameters, configs, containers, etc. without modifying
+# the test file
+#
+# member variables are public and read-only
+# if a member variable is listed without a value, it is required
+# if a member variable is listed with a value, it is optional and that value is the default
+
+actor args = args_actor,
+  vars:
+    required,
+    optional_a: "foo",
+    optional_b: "bar",
+
+# you can "check" statements in the actor to validate member variables
+as args:
+  @expect "optional_a and optional_b should be different"
+  check
+  assert self.optional_a != self.optional_b
+
+  @expect "required must be unique"
+  check
+  assert self.required != self.optional_a
+  assert self.required != self.optional_b

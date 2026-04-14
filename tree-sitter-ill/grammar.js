@@ -37,8 +37,7 @@ module.exports = grammar({
         optional(seq(",", $.actor_body)),
       ),
 
-    actor_type: (_) =>
-      choice("container", "pg_client", "mqtt_client", "http_client"),
+    actor_type: ($) => $.identifier,
 
     actor_body: ($) =>
       seq($.INDENT, $._actor_property_list, $.DEDENT),
