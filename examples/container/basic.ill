@@ -8,7 +8,23 @@ actor nginx = container,
     @access read
     port: 8080
 
+actor app = container,
+  image: "my-app:latest"
+
 # run starts the container; it will auto-stop when the test ends
+# env vars are passed directly to the container process
 as nginx:
   run,
     port: self.port
+    env:
+      NGINX_HOST: "localhost"
+
+# startup timeout (ms) — how long to wait for the container to become healthy
+# intentionally tiny here to force a timeout error
+as app:
+  run,
+    port: 8080
+    env:
+      APP_ENV: "test"
+    timeout: 1
+  assert error.container.reason == :timeout
