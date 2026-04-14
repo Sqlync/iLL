@@ -87,7 +87,7 @@
   "${" @punctuation.special
   "}" @punctuation.special)
 
-; ─── Sigils (~sql`...`, ~json`...`) ──────────────────────────────────────────
+; ─── Sigils (~sql`...`, ~json`...`, ~hex`...`) ──────────────────────────────────────────
 
 (sigil "~" @string.special)
 (sigil_name) @string.special
@@ -102,7 +102,6 @@
 ; ─── Numbers ─────────────────────────────────────────────────────────────────
 
 (number) @number
-(hex_number) @number
 
 ; ─── Booleans ────────────────────────────────────────────────────────────────
 

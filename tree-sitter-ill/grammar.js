@@ -201,7 +201,6 @@ module.exports = grammar({
         $.string,
         $.sigil,
         $.number,
-        $.hex_number,
         $.boolean,
         $.atom,
         $.array,
@@ -236,14 +235,12 @@ module.exports = grammar({
         "`",
       ),
 
-    sigil_name: (_) => choice("sql", "json"),
+    sigil_name: (_) => choice("sql", "json", "hex"),
 
     sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\./)),
 
     // ─── Primitives ────────────────────────────────────────────────────
     number: (_) => /\d+/,
-
-    hex_number: (_) => /0x[0-9a-fA-F]+/,
 
     boolean: (_) => choice("true", "false"),
 

@@ -22,7 +22,7 @@ as alice:
     port: 9999
   assert error.network.reason == :connection_refused
 
-# mqtt-level failure — broker rejected with CONNACK reason_code 0x87
+# mqtt-level failure — broker rejected with CONNACK reason_code 135
 as alice:
   connect,
     host: "localhost"
@@ -30,7 +30,7 @@ as alice:
     username: "wrong"
     password: "wrong"
   assert error.mqtt.reason == :not_authorized
-  assert error.mqtt.reason_code == 0x87
+  assert error.mqtt.reason_code == 135
 
 # successful connection — connack fields available on ok
 as alice:

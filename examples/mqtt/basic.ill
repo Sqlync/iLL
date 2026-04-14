@@ -51,6 +51,11 @@ as alice:
   receive publish
   assert ok.payload == "got: world"
 
+  # publish a binary payload using ~hex sigil
+  publish_0 "sensors/data", ~hex`DEADBEEF`
+  receive publish
+  assert ok.payload == ~hex`DEADBEEF`
+
   # step 7: (error demonstration) alice publishes to an invalid topic
   publish_0 "", "bad topic"
   assert error.mqtt.reason == :invalid_topic
@@ -62,6 +67,6 @@ as alice:
 
   # step 9: disconnect with reason code and user properties
   disconnect,
-    reason_code: 0x00
+    reason_code: 0
     user_properties:
       "reason": "test complete"

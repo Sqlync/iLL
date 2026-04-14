@@ -718,10 +718,6 @@
           "named": true
         },
         {
-          "type": "hex_number",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -1007,8 +1003,8 @@
     "named": false
   },
   {
-    "type": "hex_number",
-    "named": true
+    "type": "hex",
+    "named": false
   },
   {
     "type": "identifier",
