@@ -211,6 +211,7 @@ impl<'r> Validator<'r> {
                     expected.join(", "),
                 ),
             ));
+            return (ValueType::Unknown, ValueType::Unknown);
         }
 
         // Required positional args (presence only for now).
@@ -457,21 +458,8 @@ as alice:
 
     #[test]
     fn all_examples_validate_cleanly() {
-        fn visit(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for entry in std::fs::read_dir(dir).unwrap().flatten() {
-                let p = entry.path();
-                if p.is_dir() {
-                    visit(&p, out);
-                } else if p.extension().and_then(|s| s.to_str()) == Some("ill") {
-                    out.push(p);
-                }
-            }
-        }
-
         let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let mut paths = Vec::new();
-        visit(&examples_dir, &mut paths);
-        paths.sort();
+        let paths = crate::test_util::collect_ill_files(&examples_dir);
         assert!(!paths.is_empty(), "no examples found");
 
         let mut failures = Vec::new();
@@ -510,5 +498,47 @@ as alice:
   query \"SELECT 1\"
 ";
         assert!(diags(src).is_empty(), "expected no diagnostics");
+    }
+
+    /// A command immediately followed by `assert error.*` is on the failure
+    /// branch. The validator must NOT apply the mode transition, so subsequent
+    /// commands that require the pre-command mode remain valid.
+    #[test]
+    fn error_branch_does_not_advance_mode() {
+        // connect is followed by an error assert → stays disconnected.
+        // A second connect attempt must therefore be valid (not flagged as
+        // "connect not valid in connected mode").
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  assert error.code == 1
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert!(diags(src).is_empty(), "expected no diagnostics");
+    }
+
+    /// Conversely, a successful connect (no error assert) must advance the mode,
+    /// making a second connect invalid.
+    #[test]
+    fn successful_command_advances_mode() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert_eq!(
+            codes(&diags(src)),
+            vec![DiagnosticCode::CommandNotValidInMode]
+        );
     }
 }
