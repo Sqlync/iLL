@@ -41,6 +41,8 @@ fn run_test(paths: &[PathBuf]) {
         for p in paths {
             if p.is_dir() {
                 all.extend(collect_ill_files(p));
+            } else if p.extension().and_then(|s| s.to_str()) != Some(ILL_EXTENSION) {
+                eprintln!("ill: skipping {}: not a .ill file", p.display());
             } else {
                 all.push(p.clone());
             }
@@ -105,7 +107,14 @@ fn collect_ill_files_inner(dir: &Path, out: &mut Vec<PathBuf>) {
             return;
         }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("ill: error reading directory entry: {e}");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.is_dir() {
             collect_ill_files_inner(&path, out);
