@@ -8,9 +8,9 @@
 
 actor args = args_actor,
   vars:
-    required,
-    optional_a: "foo",
-    optional_b: "bar",
+    required
+    optional_a: "foo"
+    optional_b: "bar"
 
 # you can "check" statements in the actor to validate member variables
 as args:

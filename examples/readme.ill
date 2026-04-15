@@ -16,7 +16,7 @@ actor alice = http_client,
     @mut once
     @access read
     user_id
-actor bob = pg_client 
+actor bob = pg_client
 
 # step 1: start a postgres database 
 as db:
@@ -58,4 +58,3 @@ as bob:
   @expect "Alice should be in the database, with correct name and email"
   query ~sql`SELECT name, email FROM users WHERE id = ${alice.user_id}`
   assert ok.row[0] == ["alice", "alice@example.com"]
-  
