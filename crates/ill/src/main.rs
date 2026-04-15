@@ -74,10 +74,20 @@ fn run_test(paths: &[PathBuf]) {
 
         match ill_core::lower::lower(&src) {
             Ok(ast) => {
-                println!("=== {} ===", path.display());
-                println!("{ast:#?}");
-                println!();
-                passed += 1;
+                let diags = ill_core::validate::validate(&ast);
+                let errors: Vec<_> = diags
+                    .iter()
+                    .filter(|d| d.severity == ill_core::diagnostic::Severity::Error)
+                    .collect();
+                if errors.is_empty() {
+                    passed += 1;
+                } else {
+                    eprintln!("FAIL {}", path.display());
+                    for d in &errors {
+                        eprintln!("  {d}");
+                    }
+                    failed += 1;
+                }
             }
             Err(errors) => {
                 eprintln!("FAIL {}", path.display());

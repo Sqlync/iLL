@@ -19,9 +19,9 @@ Write `grammar.js`. Get it parsing all the examples. Test with `tree-sitter pars
 ## Phase 3: AST
 Define Rust data structures for the language and lower the tree-sitter CST into them. Commands are generic (name + args) — actor-specific knowledge lives in the validation pass, not the AST.
 
-- [ ] Core AST types (actors, statements, expressions)
-- [ ] Tree-sitter → AST lowering pass
-- [ ] All examples lower to valid ASTs
+- [x] Core AST types (actors, statements, expressions)
+- [x] Tree-sitter → AST lowering pass
+- [x] All examples lower to valid ASTs
 
 ## Phase 4: Validation Pass
 Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Actor-specific command and mode definitions live here, making actor types pluggable.
