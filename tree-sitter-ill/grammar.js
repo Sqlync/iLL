@@ -7,8 +7,12 @@
 // iLL is indentation-sensitive. An external scanner emits NEWLINE, INDENT,
 // and DEDENT tokens so the grammar can express block structure.
 
+// Allow optional leading NEWLINEs so a comment before the first item in a
+// block doesn't produce an ERROR node. Between items, at least one NEWLINE
+// is still required (the scanner also emits a pending NEWLINE after a DEDENT
+// that returns to the enclosing block's indent level).
 const newline_list = ($, rule) =>
-  seq(rule, repeat(seq(repeat1($.NEWLINE), rule)));
+  seq(repeat($.NEWLINE), rule, repeat(seq(repeat1($.NEWLINE), rule)));
 
 module.exports = grammar({
   name: "ill",
@@ -219,11 +223,13 @@ module.exports = grammar({
     double_quoted_string: ($) =>
       seq('"', repeat(choice($.interpolation, $.string_content)), '"'),
 
-    string_content: (_) => token.immediate(prec(1, /[^"\\$]+|\\./)),
+    // Allow lone $ (not followed by {) so patterns like "^foo$" work.
+    // interpolation uses prec(2) to win over string_content when ${ appears.
+    string_content: (_) => token.immediate(prec(1, /[^"\\$]+|\\.|[$]/)),
 
     single_quoted_string: (_) => token(seq("'", /[^']*/, "'")),
 
-    interpolation: ($) => seq(token.immediate("${"), $._expression, "}"),
+    interpolation: ($) => seq(token.immediate(prec(2, "${")), $._expression, "}"),
 
     // ─── Sigils ────────────────────────────────────────────────────────
     sigil: ($) =>
@@ -237,7 +243,8 @@ module.exports = grammar({
 
     sigil_name: (_) => choice("sql", "json", "hex"),
 
-    sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\./)),
+    // Same lone-$ fix as string_content.
+    sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),
 
     // ─── Primitives ────────────────────────────────────────────────────
     number: (_) => /\d+/,

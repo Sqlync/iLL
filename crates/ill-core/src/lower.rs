@@ -32,13 +32,29 @@ impl std::fmt::Display for LowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LowerError::UnexpectedNode { kind, span } => {
-                write!(f, "unexpected node `{}` at {}..{}", kind, span.start, span.end)
+                write!(
+                    f,
+                    "unexpected node `{}` at {}..{}",
+                    kind, span.start, span.end
+                )
             }
-            LowerError::MissingField { parent, field, span } => {
-                write!(f, "missing field `{}` on `{}` at {}..{}", field, parent, span.start, span.end)
+            LowerError::MissingField {
+                parent,
+                field,
+                span,
+            } => {
+                write!(
+                    f,
+                    "missing field `{}` on `{}` at {}..{}",
+                    field, parent, span.start, span.end
+                )
             }
             LowerError::InvalidLiteral { text, span } => {
-                write!(f, "invalid literal `{}` at {}..{}", text, span.start, span.end)
+                write!(
+                    f,
+                    "invalid literal `{}` at {}..{}",
+                    text, span.start, span.end
+                )
             }
             LowerError::TreeSitterError { span } => {
                 write!(f, "parse error at {}..{}", span.start, span.end)
@@ -57,43 +73,25 @@ pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
         .set_language(&tree_sitter_ill::LANGUAGE.into())
         .expect("failed to load tree-sitter-ill grammar");
 
-    // The external scanner can produce infinite NEWLINE tokens at EOF.
-    // Use a progress callback to detect when parsing is stuck at the end.
-    let source_len = source.len();
-    let mut stall_count: usize = 0;
-    let mut last_offset: usize = 0;
-    let mut progress_cb = move |state: &tree_sitter::ParseState| {
-        let offset = state.current_byte_offset();
-        if offset >= source_len {
-            stall_count += 1;
-            if stall_count > 128 {
-                return std::ops::ControlFlow::Break(());
-            }
-        } else {
-            stall_count = 0;
-            last_offset = offset;
-        }
-        std::ops::ControlFlow::Continue(())
+    // Ensure the source ends with a blank line. The external scanner handles
+    // trailing newlines through the normal indentation path, which terminates
+    // cleanly. Without this, the scanner can loop at EOF in the Rust runtime.
+    let owned;
+    let src: &str = if source.ends_with("\n\n") {
+        source
+    } else if source.ends_with('\n') {
+        owned = format!("{source}\n");
+        &owned
+    } else {
+        owned = format!("{source}\n\n");
+        &owned
     };
-    let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress_cb);
 
-    let tree = parser
-        .parse_with_options(
-            &mut |i: usize, _| {
-                if i < source.len() {
-                    &source.as_bytes()[i..]
-                } else {
-                    &[]
-                }
-            },
-            None,
-            Some(options),
-        )
-        .expect("tree-sitter parse failed or was cancelled");
+    let tree = parser.parse(src, None).expect("tree-sitter parse failed");
     let root = tree.root_node();
 
     let mut ctx = LowerCtx {
-        source,
+        source: src,
         errors: Vec::new(),
     };
 
@@ -247,11 +245,7 @@ impl<'a> LowerCtx<'a> {
         });
     }
 
-    fn lower_vars_block(
-        &mut self,
-        node: tree_sitter::Node,
-        vars: &mut Vec<VarDeclaration>,
-    ) {
+    fn lower_vars_block(&mut self, node: tree_sitter::Node, vars: &mut Vec<VarDeclaration>) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             if child.kind() == "var_declaration" {
@@ -409,11 +403,7 @@ impl<'a> LowerCtx<'a> {
 
     // ── Keyword args ───────────────────────────────────────────────────────
 
-    fn lower_keyword_block(
-        &mut self,
-        node: tree_sitter::Node,
-        args: &mut Vec<KeywordArg>,
-    ) {
+    fn lower_keyword_block(&mut self, node: tree_sitter::Node, args: &mut Vec<KeywordArg>) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             if child.kind() == "keyword_arg" {
@@ -424,11 +414,7 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
-    fn lower_inline_keyword_args(
-        &mut self,
-        node: tree_sitter::Node,
-        args: &mut Vec<KeywordArg>,
-    ) {
+    fn lower_inline_keyword_args(&mut self, node: tree_sitter::Node, args: &mut Vec<KeywordArg>) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             if child.kind() == "keyword_arg" {
@@ -814,8 +800,8 @@ impl<'a> LowerCtx<'a> {
     /// be one of the structural nodes we need to skip past.
     fn lower_expression_from_value(&mut self, node: tree_sitter::Node) -> Option<Expr> {
         match node.kind() {
-            "primary_expression" | "member_expression" | "index_expression"
-            | "identifier" | "string" | "number" | "boolean" | "atom" | "array" | "sigil" => {
+            "primary_expression" | "member_expression" | "index_expression" | "identifier"
+            | "string" | "number" | "boolean" | "atom" | "array" | "sigil" => {
                 self.lower_expression(node)
             }
             _ => {
@@ -851,14 +837,20 @@ mod tests {
     fn parse_does_not_hang() {
         // Minimal test to verify tree-sitter parsing completes
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_ill::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_ill::LANGUAGE.into())
+            .unwrap();
         let source = std::fs::read_to_string("../../examples/container/basic.ill")
             .expect("should read example file");
         eprintln!("about to parse {} bytes", source.len());
         let tree = parser.parse(&source, None).expect("parse should not fail");
         eprintln!("parse done");
         let root = tree.root_node();
-        eprintln!("root: {} children={}", root.kind(), root.named_child_count());
+        eprintln!(
+            "root: {} children={}",
+            root.kind(),
+            root.named_child_count()
+        );
         assert_eq!(root.kind(), "source_file");
     }
 }

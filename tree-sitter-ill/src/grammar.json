@@ -123,6 +123,13 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "NEWLINE"
+          }
+        },
+        {
           "type": "SYMBOL",
           "name": "actor_property"
         },
@@ -209,6 +216,13 @@
     "_var_list": {
       "type": "SEQ",
       "members": [
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "NEWLINE"
+          }
+        },
         {
           "type": "SYMBOL",
           "name": "var_declaration"
@@ -384,6 +398,13 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "NEWLINE"
+          }
+        },
+        {
           "type": "SYMBOL",
           "name": "_statement"
         },
@@ -548,6 +569,13 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "NEWLINE"
+          }
+        },
+        {
           "type": "SYMBOL",
           "name": "keyword_arg"
         },
@@ -647,6 +675,13 @@
     "_keyword_pair_list": {
       "type": "SEQ",
       "members": [
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "NEWLINE"
+          }
+        },
         {
           "type": "SYMBOL",
           "name": "keyword_pair"
@@ -1116,7 +1151,7 @@
         "value": 1,
         "content": {
           "type": "PATTERN",
-          "value": "[^\"\\\\$]+|\\\\."
+          "value": "[^\"\\\\$]+|\\\\.|[$]"
         }
       }
     },
@@ -1146,8 +1181,12 @@
         {
           "type": "IMMEDIATE_TOKEN",
           "content": {
-            "type": "STRING",
-            "value": "${"
+            "type": "PREC",
+            "value": 2,
+            "content": {
+              "type": "STRING",
+              "value": "${"
+            }
           }
         },
         {
@@ -1225,7 +1264,7 @@
         "value": 1,
         "content": {
           "type": "PATTERN",
-          "value": "[^`\\\\$]+|\\\\."
+          "value": "[^`\\\\$]+|\\\\.|[$]"
         }
       }
     },

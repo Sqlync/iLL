@@ -16,6 +16,12 @@ typedef struct {
   uint16_t indent_stack[MAX_INDENT_LEVELS];
   uint8_t stack_size;
   uint8_t pending_dedents;
+  // After a DEDENT that returns to the enclosing block's indent level we need
+  // to emit one NEWLINE (the newline that separated the statement-with-block
+  // from whatever comes next).  We can't emit it during the DEDENT scan call
+  // because we've already advanced past the whitespace; we queue it here and
+  // emit it on the next call when valid_symbols[NEWLINE] becomes true.
+  bool pending_newline;
 } Scanner;
 
 void *tree_sitter_ill_external_scanner_create(void) {
@@ -23,6 +29,7 @@ void *tree_sitter_ill_external_scanner_create(void) {
   scanner->indent_stack[0] = 0;
   scanner->stack_size = 1;
   scanner->pending_dedents = 0;
+  scanner->pending_newline = false;
   return scanner;
 }
 
@@ -37,6 +44,7 @@ unsigned tree_sitter_ill_external_scanner_serialize(void *payload,
 
   buffer[size++] = (char)scanner->stack_size;
   buffer[size++] = (char)scanner->pending_dedents;
+  buffer[size++] = (char)scanner->pending_newline;
 
   for (uint8_t i = 0; i < scanner->stack_size; i++) {
     buffer[size++] = (char)(scanner->indent_stack[i] & 0xFF);
@@ -55,6 +63,7 @@ void tree_sitter_ill_external_scanner_deserialize(void *payload,
     scanner->indent_stack[0] = 0;
     scanner->stack_size = 1;
     scanner->pending_dedents = 0;
+    scanner->pending_newline = false;
     return;
   }
 
@@ -64,6 +73,7 @@ void tree_sitter_ill_external_scanner_deserialize(void *payload,
     scanner->stack_size = MAX_INDENT_LEVELS;
   }
   scanner->pending_dedents = (uint8_t)buffer[pos++];
+  if (pos < length) scanner->pending_newline = (bool)buffer[pos++];
 
   for (uint8_t i = 0; i < scanner->stack_size && pos + 1 < length; i++) {
     scanner->indent_stack[i] =
@@ -81,22 +91,33 @@ bool tree_sitter_ill_external_scanner_scan(void *payload, TSLexer *lexer,
                                             const bool *valid_symbols) {
   Scanner *scanner = (Scanner *)payload;
 
-  // Emit pending DEDENTs first
+  // Emit pending DEDENTs before anything else.
   if (scanner->pending_dedents > 0 && valid_symbols[DEDENT]) {
     scanner->pending_dedents--;
     lexer->result_symbol = DEDENT;
     return true;
   }
 
-  // Nothing to do if no external tokens are valid
+  // After all pending DEDENTs are done, emit the queued NEWLINE (if any).
+  // This provides the statement-separator NEWLINE that was consumed during
+  // DEDENT processing (the scanner had to advance past the newline to
+  // measure the next line's indent level before deciding INDENT/NEWLINE/DEDENT).
+  if (scanner->pending_dedents == 0 && scanner->pending_newline &&
+      valid_symbols[NEWLINE]) {
+    scanner->pending_newline = false;
+    lexer->result_symbol = NEWLINE;
+    return true;
+  }
+
+  // Nothing to do if no external tokens are valid.
   if (!valid_symbols[NEWLINE] && !valid_symbols[INDENT] &&
       !valid_symbols[DEDENT]) {
     return false;
   }
 
-  // At a newline, handle indentation
+  // At a newline, handle indentation.
   if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
-    // Consume newline(s) and skip blank lines
+    // Consume newline(s) and skip blank lines.
     while (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
       lexer->advance(lexer, true);
       uint16_t indent = 0;
@@ -105,10 +126,10 @@ bool tree_sitter_ill_external_scanner_scan(void *payload, TSLexer *lexer,
         lexer->advance(lexer, true);
       }
       if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
-        continue;
+        continue;  // skip blank lines
       }
 
-      // We have the indent of the next meaningful line
+      // We have the indent of the next meaningful line.
       uint16_t cur = current_indent(scanner);
 
       if (indent > cur && valid_symbols[INDENT]) {
@@ -118,10 +139,16 @@ bool tree_sitter_ill_external_scanner_scan(void *payload, TSLexer *lexer,
         lexer->result_symbol = INDENT;
         return true;
       } else if (indent < cur && valid_symbols[DEDENT]) {
+        // Pop indent levels until we reach one <= the new indent.
         while (scanner->stack_size > 1 &&
                scanner->indent_stack[scanner->stack_size - 1] > indent) {
           scanner->stack_size--;
           scanner->pending_dedents++;
+        }
+        // If we returned exactly to the enclosing block's level, queue a
+        // NEWLINE so the grammar can separate the next statement.
+        if (scanner->indent_stack[scanner->stack_size - 1] == indent) {
+          scanner->pending_newline = true;
         }
         scanner->pending_dedents--;
         lexer->result_symbol = DEDENT;
@@ -135,15 +162,16 @@ bool tree_sitter_ill_external_scanner_scan(void *payload, TSLexer *lexer,
     }
   }
 
-  // At EOF, emit any remaining DEDENTs
+  // At EOF, emit any remaining DEDENTs.
+  // We intentionally do NOT emit NEWLINE here. Well-formed source files end
+  // with a trailing newline, so the normal newline path above handles any
+  // final INDENT/NEWLINE/DEDENT tokens. Emitting NEWLINE at EOF would loop
+  // forever in tree-sitter's Rust runtime because source_file's top-level
+  // repeat keeps valid_symbols[NEWLINE] true indefinitely.
   if (lexer->eof(lexer)) {
     if (valid_symbols[DEDENT] && scanner->stack_size > 1) {
       scanner->stack_size--;
       lexer->result_symbol = DEDENT;
-      return true;
-    }
-    if (valid_symbols[NEWLINE]) {
-      lexer->result_symbol = NEWLINE;
       return true;
     }
   }
