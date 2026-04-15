@@ -86,7 +86,7 @@ impl<'r> Validator<'r> {
             &decl.keyword_args,
             type_def.constructor_keyword(),
             decl.span,
-            /*command_context=*/ None,
+            None,
         );
 
         let mut vars = HashMap::new();
@@ -132,7 +132,7 @@ impl<'r> Validator<'r> {
                     // on `error.*` is on the failure branch — don't apply the
                     // success-path mode transition.
                     let on_error_branch = asserts_error_before_next_command(&block.body, idx);
-                    let (ok, _err) = self.check_command(&block.actor.name, cmd, !on_error_branch);
+                    let (ok, _) = self.check_command(&block.actor.name, cmd, !on_error_branch);
                     last_ok = ok;
                 }
                 Statement::Let(let_stmt) => {
