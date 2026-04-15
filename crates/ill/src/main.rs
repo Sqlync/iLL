@@ -12,7 +12,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Parse .ill files and print their ASTs.
+    /// Run .ill test files.
     ///
     /// Accepts any number of files and/or directories. Directories are searched
     /// recursively for .ill files. With no arguments, searches the current
