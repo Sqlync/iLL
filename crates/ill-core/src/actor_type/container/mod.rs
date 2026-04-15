@@ -32,9 +32,21 @@ impl ActorType for Container {
         // required; Phase 4 accepts any of them (or none, for declarations that
         // are purely parameterized). Tighten once the grammar settles.
         &[
-            KeywordArgDef { name: "image", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "file", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "dockerfile", ty: ValueType::String, required: false },
+            KeywordArgDef {
+                name: "image",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "file",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "dockerfile",
+                ty: ValueType::String,
+                required: false,
+            },
         ]
     }
 }

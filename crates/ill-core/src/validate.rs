@@ -14,7 +14,9 @@
 use std::collections::HashMap;
 
 use crate::actor_type::{ActorType, KeywordArgDef, Mode, ValueType};
-use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel};
+use crate::ast::{
+    self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel,
+};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
 
@@ -125,10 +127,14 @@ impl<'r> Validator<'r> {
         let mut last_ok: ValueType = ValueType::Unknown;
         let mut last_err: ValueType = ValueType::Unknown;
 
-        for stmt in &block.body {
+        for (idx, stmt) in block.body.iter().enumerate() {
             match stmt {
                 Statement::Command(cmd) => {
-                    let (ok, err) = self.check_command(&block.actor.name, cmd);
+                    // A command followed (before the next command) by an assert
+                    // on `error.*` is on the failure branch — don't apply the
+                    // success-path mode transition.
+                    let on_error_branch = asserts_error_before_next_command(&block.body, idx);
+                    let (ok, err) = self.check_command(&block.actor.name, cmd, !on_error_branch);
                     last_ok = ok;
                     last_err = err;
                 }
@@ -162,7 +168,16 @@ impl<'r> Validator<'r> {
 
     /// Returns `(ok_type, error_type)` for the command, used by following
     /// `let`/`assert` statements that reference `ok.*` / `error.*`.
-    fn check_command(&mut self, actor_name: &str, cmd: &ast::Command) -> (ValueType, ValueType) {
+    ///
+    /// `apply_transition` is false when the caller has determined this command
+    /// is on the error branch (asserted via `error.*`), in which case the
+    /// success-path mode transition must not happen.
+    fn check_command(
+        &mut self,
+        actor_name: &str,
+        cmd: &ast::Command,
+        apply_transition: bool,
+    ) -> (ValueType, ValueType) {
         let Some(state) = self.actors.get(actor_name) else {
             return (ValueType::Unknown, ValueType::Unknown);
         };
@@ -224,9 +239,10 @@ impl<'r> Validator<'r> {
             Some(&cmd.name.name),
         );
 
-        // Apply mode transition (only if the mode check passed — otherwise
-        // transitioning from an invalid state would compound errors).
-        if in_valid_mode {
+        // Apply mode transition only if: (1) the command was valid in the
+        // current mode (otherwise we'd compound errors on bogus state), and
+        // (2) the caller didn't mark this as the error branch.
+        if in_valid_mode && apply_transition {
             if let Some(next) = cmd_def.transitions_to() {
                 if let Some(state) = self.actors.get_mut(actor_name) {
                     state.mode = next;
@@ -249,7 +265,10 @@ impl<'r> Validator<'r> {
             if !expected.iter().any(|d| d.name == kw.key.name) {
                 let msg = match command_context {
                     Some(cmd) => {
-                        format!("unknown keyword arg `{}` for command `{}`", kw.key.name, cmd)
+                        format!(
+                            "unknown keyword arg `{}` for command `{}`",
+                            kw.key.name, cmd
+                        )
                     }
                     None => format!("unknown keyword arg `{}`", kw.key.name),
                 };
@@ -308,12 +327,40 @@ impl<'r> Validator<'r> {
     }
 }
 
+/// True if the command at `cmd_idx` is followed (before any later command)
+/// by an assert whose left-hand side starts with the `error` identifier.
+///
+/// This lets the validator stay on the failure branch rather than naively
+/// advancing the mode as if the command had succeeded.
+fn asserts_error_before_next_command(body: &[Statement], cmd_idx: usize) -> bool {
+    for stmt in &body[cmd_idx + 1..] {
+        match stmt {
+            Statement::Command(_) => return false,
+            Statement::Assert(a) if expr_starts_with_ident(&a.left, "error") => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident(ident) => ident.name == name,
+        Expr::MemberAccess { object, .. } => expr_starts_with_ident(object, name),
+        Expr::Index { object, .. } => expr_starts_with_ident(object, name),
+        _ => false,
+    }
+}
+
 /// Context-free expression type — good enough for literals and simple forms.
 fn expr_type(expr: &Expr) -> ValueType {
     match expr {
         Expr::StringLit(s) => {
             // Pure string literals are String; interpolated ones still are.
-            if s.fragments.iter().all(|f| matches!(f, StringFragment::Text(_))) {
+            if s.fragments
+                .iter()
+                .all(|f| matches!(f, StringFragment::Text(_)))
+            {
                 ValueType::String
             } else {
                 ValueType::String
@@ -406,7 +453,9 @@ as alice:
 ";
         // missing `database`
         let ds = diags(src);
-        assert!(ds.iter().any(|d| d.code == DiagnosticCode::MissingRequiredArg));
+        assert!(ds
+            .iter()
+            .any(|d| d.code == DiagnosticCode::MissingRequiredArg));
     }
 
     #[test]
@@ -420,7 +469,53 @@ as alice:
     bogus: 1
 ";
         let ds = diags(src);
-        assert!(ds.iter().any(|d| d.code == DiagnosticCode::UnknownKeywordArg));
+        assert!(ds
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnknownKeywordArg));
+    }
+
+    #[test]
+    fn all_examples_validate_cleanly() {
+        fn visit(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    visit(&p, out);
+                } else if p.extension().and_then(|s| s.to_str()) == Some("ill") {
+                    out.push(p);
+                }
+            }
+        }
+
+        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut paths = Vec::new();
+        visit(&examples_dir, &mut paths);
+        paths.sort();
+        assert!(!paths.is_empty(), "no examples found");
+
+        let mut failures = Vec::new();
+        for p in &paths {
+            let src = std::fs::read_to_string(p).expect("read example");
+            let ast = lower(&src).expect("lower example");
+            let ds = validate(&ast);
+            let errors: Vec<_> = ds
+                .iter()
+                .filter(|d| d.severity == crate::diagnostic::Severity::Error)
+                .collect();
+            if !errors.is_empty() {
+                failures.push((p.clone(), errors.into_iter().cloned().collect::<Vec<_>>()));
+            }
+        }
+
+        if !failures.is_empty() {
+            for (p, errs) in &failures {
+                eprintln!("{}", p.display());
+                for e in errs {
+                    eprintln!("  {e}");
+                }
+            }
+            panic!("{} example(s) failed validation", failures.len());
+        }
     }
 
     #[test]

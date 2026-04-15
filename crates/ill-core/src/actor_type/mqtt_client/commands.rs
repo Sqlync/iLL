@@ -3,36 +3,86 @@ use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, ValueType};
 
 pub struct Connect;
 impl Command for Connect {
-    fn name(&self) -> &'static str { "connect" }
+    fn name(&self) -> &'static str {
+        "connect"
+    }
     fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
         static VALID: &[&dyn Mode] = &[DISCONNECTED];
         VALID
     }
-    fn transitions_to(&self) -> Option<&'static dyn Mode> { Some(CONNECTED) }
+    fn transitions_to(&self) -> Option<&'static dyn Mode> {
+        Some(CONNECTED)
+    }
     fn keyword(&self) -> &'static [KeywordArgDef] {
         &[
-            KeywordArgDef { name: "host", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "port", ty: ValueType::Number, required: false },
-            KeywordArgDef { name: "client_id", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "clean_start", ty: ValueType::Bool, required: false },
-            KeywordArgDef { name: "keep_alive", ty: ValueType::Number, required: false },
-            KeywordArgDef { name: "user_properties", ty: ValueType::Unknown, required: false },
+            KeywordArgDef {
+                name: "host",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "port",
+                ty: ValueType::Number,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "username",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "password",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "client_id",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "clean_start",
+                ty: ValueType::Bool,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "keep_alive",
+                ty: ValueType::Number,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "user_properties",
+                ty: ValueType::Unknown,
+                required: false,
+            },
         ]
     }
 }
 
 pub struct Disconnect;
 impl Command for Disconnect {
-    fn name(&self) -> &'static str { "disconnect" }
+    fn name(&self) -> &'static str {
+        "disconnect"
+    }
     fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
         static VALID: &[&dyn Mode] = &[CONNECTED];
         VALID
     }
-    fn transitions_to(&self) -> Option<&'static dyn Mode> { Some(DISCONNECTED) }
+    fn transitions_to(&self) -> Option<&'static dyn Mode> {
+        Some(DISCONNECTED)
+    }
     fn keyword(&self) -> &'static [KeywordArgDef] {
         &[
-            KeywordArgDef { name: "reason_code", ty: ValueType::Number, required: false },
-            KeywordArgDef { name: "user_properties", ty: ValueType::Unknown, required: false },
+            KeywordArgDef {
+                name: "reason_code",
+                ty: ValueType::Number,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "user_properties",
+                ty: ValueType::Unknown,
+                required: false,
+            },
         ]
     }
 }
@@ -41,17 +91,26 @@ macro_rules! subscribe_cmd {
     ($struct:ident, $name:literal, $static:ident) => {
         pub struct $struct;
         impl Command for $struct {
-            fn name(&self) -> &'static str { $name }
+            fn name(&self) -> &'static str {
+                $name
+            }
             fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
                 static VALID: &[&dyn Mode] = &[CONNECTED];
                 VALID
             }
             fn positional(&self) -> &'static [ArgDef] {
-                const POS: &[ArgDef] = &[ArgDef { name: "topic", ty: ValueType::String }];
+                const POS: &[ArgDef] = &[ArgDef {
+                    name: "topic",
+                    ty: ValueType::String,
+                }];
                 POS
             }
             fn keyword(&self) -> &'static [KeywordArgDef] {
-                &[KeywordArgDef { name: "user_properties", ty: ValueType::Unknown, required: false }]
+                &[KeywordArgDef {
+                    name: "user_properties",
+                    ty: ValueType::Unknown,
+                    required: false,
+                }]
             }
         }
         pub static $static: &dyn Command = &$struct;
@@ -62,20 +121,32 @@ macro_rules! publish_cmd {
     ($struct:ident, $name:literal, $static:ident) => {
         pub struct $struct;
         impl Command for $struct {
-            fn name(&self) -> &'static str { $name }
+            fn name(&self) -> &'static str {
+                $name
+            }
             fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
                 static VALID: &[&dyn Mode] = &[CONNECTED];
                 VALID
             }
             fn positional(&self) -> &'static [ArgDef] {
                 const POS: &[ArgDef] = &[
-                    ArgDef { name: "topic", ty: ValueType::String },
-                    ArgDef { name: "payload", ty: ValueType::Unknown },
+                    ArgDef {
+                        name: "topic",
+                        ty: ValueType::String,
+                    },
+                    ArgDef {
+                        name: "payload",
+                        ty: ValueType::Unknown,
+                    },
                 ];
                 POS
             }
             fn keyword(&self) -> &'static [KeywordArgDef] {
-                &[KeywordArgDef { name: "user_properties", ty: ValueType::Unknown, required: false }]
+                &[KeywordArgDef {
+                    name: "user_properties",
+                    ty: ValueType::Unknown,
+                    required: false,
+                }]
             }
         }
         pub static $static: &dyn Command = &$struct;
@@ -92,7 +163,9 @@ publish_cmd!(Publish2, "publish_2", PUBLISH_2);
 
 pub struct Receive;
 impl Command for Receive {
-    fn name(&self) -> &'static str { "receive" }
+    fn name(&self) -> &'static str {
+        "receive"
+    }
     fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
         static VALID: &[&dyn Mode] = &[CONNECTED];
         VALID
@@ -100,11 +173,18 @@ impl Command for Receive {
     fn positional(&self) -> &'static [ArgDef] {
         // `receive publish` — the event kind is an identifier, currently
         // positional. Typed as Unknown since it's an identifier, not a value.
-        const POS: &[ArgDef] = &[ArgDef { name: "event", ty: ValueType::Unknown }];
+        const POS: &[ArgDef] = &[ArgDef {
+            name: "event",
+            ty: ValueType::Unknown,
+        }];
         POS
     }
     fn keyword(&self) -> &'static [KeywordArgDef] {
-        &[KeywordArgDef { name: "timeout", ty: ValueType::Number, required: false }]
+        &[KeywordArgDef {
+            name: "timeout",
+            ty: ValueType::Number,
+            required: false,
+        }]
     }
 }
 

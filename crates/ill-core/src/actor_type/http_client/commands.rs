@@ -16,14 +16,29 @@ macro_rules! http_verb {
                 VALID
             }
             fn positional(&self) -> &'static [ArgDef] {
-                const POS: &[ArgDef] = &[ArgDef { name: "url", ty: ValueType::String }];
+                const POS: &[ArgDef] = &[ArgDef {
+                    name: "url",
+                    ty: ValueType::String,
+                }];
                 POS
             }
             fn keyword(&self) -> &'static [KeywordArgDef] {
                 &[
-                    KeywordArgDef { name: "headers", ty: ValueType::Unknown, required: false },
-                    KeywordArgDef { name: "body", ty: ValueType::Unknown, required: false },
-                    KeywordArgDef { name: "timeout", ty: ValueType::Number, required: false },
+                    KeywordArgDef {
+                        name: "headers",
+                        ty: ValueType::Unknown,
+                        required: false,
+                    },
+                    KeywordArgDef {
+                        name: "body",
+                        ty: ValueType::Unknown,
+                        required: false,
+                    },
+                    KeywordArgDef {
+                        name: "timeout",
+                        ty: ValueType::Number,
+                        required: false,
+                    },
                 ]
             }
         }

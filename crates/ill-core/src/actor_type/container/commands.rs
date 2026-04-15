@@ -19,10 +19,22 @@ impl Command for Run {
 
     fn keyword(&self) -> &'static [KeywordArgDef] {
         &[
-            KeywordArgDef { name: "port", ty: ValueType::Number, required: false },
+            KeywordArgDef {
+                name: "port",
+                ty: ValueType::Number,
+                required: false,
+            },
             // `env` is a map; Phase 4 only checks the name, not the value shape.
-            KeywordArgDef { name: "env", ty: ValueType::Unknown, required: false },
-            KeywordArgDef { name: "timeout", ty: ValueType::Number, required: false },
+            KeywordArgDef {
+                name: "env",
+                ty: ValueType::Unknown,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "timeout",
+                ty: ValueType::Number,
+                required: false,
+            },
         ]
     }
 }

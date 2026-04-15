@@ -19,11 +19,31 @@ impl Command for Connect {
 
     fn keyword(&self) -> &'static [KeywordArgDef] {
         &[
-            KeywordArgDef { name: "host", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "port", ty: ValueType::Number, required: false },
-            KeywordArgDef { name: "user", ty: ValueType::String, required: true },
-            KeywordArgDef { name: "password", ty: ValueType::String, required: false },
-            KeywordArgDef { name: "database", ty: ValueType::String, required: true },
+            KeywordArgDef {
+                name: "host",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "port",
+                ty: ValueType::Number,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "user",
+                ty: ValueType::String,
+                required: true,
+            },
+            KeywordArgDef {
+                name: "password",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "database",
+                ty: ValueType::String,
+                required: true,
+            },
         ]
     }
 }
@@ -42,12 +62,19 @@ impl Command for Query {
 
     fn positional(&self) -> &'static [crate::actor_type::ArgDef] {
         use crate::actor_type::ArgDef;
-        const POSITIONAL: &[ArgDef] = &[ArgDef { name: "sql", ty: ValueType::String }];
+        const POSITIONAL: &[ArgDef] = &[ArgDef {
+            name: "sql",
+            ty: ValueType::String,
+        }];
         POSITIONAL
     }
 
     fn keyword(&self) -> &'static [KeywordArgDef] {
-        &[KeywordArgDef { name: "timeout", ty: ValueType::Number, required: false }]
+        &[KeywordArgDef {
+            name: "timeout",
+            ty: ValueType::Number,
+            required: false,
+        }]
     }
 }
 
