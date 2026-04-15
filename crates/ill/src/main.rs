@@ -3,6 +3,8 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
+const ILL_EXTENSION: &str = "ill";
+
 #[derive(Parser)]
 #[command(name = "ill", about = "iLL — integration Logic Language")]
 struct Cli {
@@ -98,13 +100,16 @@ fn collect_ill_files(dir: &Path) -> Vec<PathBuf> {
 fn collect_ill_files_inner(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("ill: cannot read directory {}: {e}", dir.display());
+            return;
+        }
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             collect_ill_files_inner(&path, out);
-        } else if path.extension().and_then(|s| s.to_str()) == Some("ill") {
+        } else if path.extension().and_then(|s| s.to_str()) == Some(ILL_EXTENSION) {
             out.push(path);
         }
     }
