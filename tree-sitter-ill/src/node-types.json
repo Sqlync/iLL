@@ -265,14 +265,56 @@
       }
     },
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "NEWLINE",
+          "named": true
+        },
         {
           "type": "annotation",
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "assignment_statement",
+    "named": true,
+    "fields": {
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "primary_expression",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -315,6 +357,10 @@
           "named": true
         },
         {
+          "type": "assignment_statement",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -349,6 +395,14 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "NEWLINE",
+          "named": true
+        },
+        {
+          "type": "annotation",
+          "named": true
+        },
         {
           "type": "index_expression",
           "named": true

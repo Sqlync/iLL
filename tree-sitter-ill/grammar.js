@@ -7,6 +7,9 @@
 // iLL is indentation-sensitive. An external scanner emits NEWLINE, INDENT,
 // and DEDENT tokens so the grammar can express block structure.
 
+// Between items, at least one NEWLINE is required (the scanner also emits a
+// pending NEWLINE after a DEDENT that returns to the enclosing block's indent
+// level). Optional leading NEWLINEs are handled per-block after INDENT.
 const newline_list = ($, rule) =>
   seq(rule, repeat(seq(repeat1($.NEWLINE), rule)));
 
@@ -18,6 +21,7 @@ module.exports = grammar({
   extras: ($) => [/[ \t]/, $.comment],
 
   word: ($) => $.identifier,
+
 
   rules: {
     source_file: ($) => repeat(choice($._top_level, $.NEWLINE)),
@@ -40,7 +44,7 @@ module.exports = grammar({
     actor_type: ($) => $.identifier,
 
     actor_body: ($) =>
-      seq($.INDENT, $._actor_property_list, $.DEDENT),
+      seq($.INDENT, repeat($.NEWLINE), $._actor_property_list, $.DEDENT),
 
     _actor_property_list: ($) => newline_list($, $.actor_property),
 
@@ -51,7 +55,7 @@ module.exports = grammar({
       ),
 
     vars_block: ($) =>
-      seq("vars", ":", $.INDENT, $._var_list, $.DEDENT),
+      seq("vars", ":", $.INDENT, repeat($.NEWLINE), $._var_list, $.DEDENT),
 
     _var_list: ($) => newline_list($, $.var_declaration),
 
@@ -60,6 +64,7 @@ module.exports = grammar({
         repeat($.annotation),
         field("name", $.identifier),
         optional(seq(":", field("default", $._expression))),
+        optional(","),
       ),
 
     // ─── Annotations ───────────────────────────────────────────────────
@@ -75,20 +80,26 @@ module.exports = grammar({
       seq("as", field("actor", $.identifier), ":", $.block),
 
     block: ($) =>
-      seq($.INDENT, $._statement_list, $.DEDENT),
+      seq($.INDENT, repeat($.NEWLINE), $._statement_list, $.DEDENT),
 
     _statement_list: ($) => newline_list($, $._statement),
 
     // ─── Statements ────────────────────────────────────────────────────
     _statement: ($) =>
-      choice($.command, $.assert_statement, $.let_statement),
+      choice($.command, $.assert_statement, $.let_statement, $.assignment_statement),
 
     // ─── Commands ──────────────────────────────────────────────────────
     // Any identifier in statement position is a command.
     // tree-sitter's `word` property ensures literal keywords (assert, let,
     // parse, as, actor, vars) take priority over $.identifier here.
     command: ($) =>
-      seq(field("name", $.identifier), optional($._command_tail)),
+      seq(
+        // Annotation may appear on its own line before the command name;
+        // repeat(NEWLINE) handles the line break between them.
+        optional(seq($.annotation, repeat($.NEWLINE))),
+        field("name", $.identifier),
+        optional($._command_tail),
+      ),
 
     // Command argument patterns:
     //   cmd                                   → no tail
@@ -98,22 +109,30 @@ module.exports = grammar({
     //   cmd x, timeout: 2                     → positional + inline keyword
     //   cmd ~<name>`...`,\n  timeout: 5000    → positional + keyword block
     //   cmd,\n  host: "localhost"             → comma + keyword block
+    //
+    // Grammar structure: a tail is either:
+    //   a) "," keyword_section              (no positional args at all)
+    //   b) expr ("," expr)* ["," keyword_section]
+    //                                        (one or more positional args, optional keyword section)
+    //
+    // Putting all positional args in one flat repetition with a single optional
+    // keyword_section suffix eliminates the shift-reduce ambiguity that arose
+    // from having two separate _positional_arg_list choices in _command_tail.
     _command_tail: ($) =>
       choice(
-        // comma + indented keyword block (no positional args)
-        seq(",", $.keyword_block),
-        // positional args only
-        $._positional_arg_list,
-        // positional args + comma + keyword section
-        seq($._positional_arg_list, ",", choice($.keyword_block, $.inline_keyword_args)),
+        seq(",", $._keyword_section),
+        seq(
+          $._expression,
+          repeat(seq(",", $._expression)),
+          optional(seq(",", $._keyword_section)),
+        ),
       ),
 
-    _positional_arg_list: ($) =>
-      prec.left(seq($._expression, repeat(seq(",", $._expression)))),
+    _keyword_section: ($) => choice($.keyword_block, $.inline_keyword_args),
 
     // Indented keyword block
     keyword_block: ($) =>
-      seq($.INDENT, $._keyword_list, $.DEDENT),
+      seq($.INDENT, repeat($.NEWLINE), $._keyword_list, $.DEDENT),
 
     _keyword_list: ($) => newline_list($, $.keyword_arg),
 
@@ -127,7 +146,7 @@ module.exports = grammar({
         ":",
         field("value", choice(
           // nested block: env:\n  KEY: "val"
-          seq($.INDENT, $._keyword_pair_list, $.DEDENT),
+          seq($.INDENT, repeat($.NEWLINE), $._keyword_pair_list, $.DEDENT),
           // simple value: port: 8080
           $._expression,
         )),
@@ -138,10 +157,19 @@ module.exports = grammar({
     keyword_pair: ($) =>
       seq(field("key", $._expression), ":", field("value", $._expression)),
 
+    // ─── Assignment ────────────────────────────────────────────────────
+    // Sets a member variable: self.user_id = resp["id"]
+    assignment_statement: ($) =>
+      seq(
+        field("target", choice($.member_expression, $.identifier)),
+        "=",
+        field("value", $._expression),
+      ),
+
     // ─── Assert ────────────────────────────────────────────────────────
     assert_statement: ($) =>
       seq(
-        optional($.annotation),
+        optional(seq($.annotation, repeat($.NEWLINE))),
         "assert",
         field("left", $._expression),
         optional(
@@ -219,11 +247,13 @@ module.exports = grammar({
     double_quoted_string: ($) =>
       seq('"', repeat(choice($.interpolation, $.string_content)), '"'),
 
-    string_content: (_) => token.immediate(prec(1, /[^"\\$]+|\\./)),
+    // Allow lone $ (not followed by {) so patterns like "^foo$" work.
+    // interpolation uses prec(2) to win over string_content when ${ appears.
+    string_content: (_) => token.immediate(prec(1, /[^"\\$]+|\\.|[$]/)),
 
     single_quoted_string: (_) => token(seq("'", /[^']*/, "'")),
 
-    interpolation: ($) => seq(token.immediate("${"), $._expression, "}"),
+    interpolation: ($) => seq(token.immediate(prec(2, "${")), $._expression, "}"),
 
     // ─── Sigils ────────────────────────────────────────────────────────
     sigil: ($) =>
@@ -237,7 +267,8 @@ module.exports = grammar({
 
     sigil_name: (_) => choice("sql", "json", "hex"),
 
-    sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\./)),
+    // Same lone-$ fix as string_content.
+    sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),
 
     // ─── Primitives ────────────────────────────────────────────────────
     number: (_) => /\d+/,
