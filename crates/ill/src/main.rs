@@ -5,6 +5,10 @@ use clap::{Parser, Subcommand};
 
 const ILL_EXTENSION: &str = "ill";
 
+fn is_ill_file(path: &Path) -> bool {
+    path.extension().and_then(|s| s.to_str()) == Some(ILL_EXTENSION)
+}
+
 #[derive(Parser)]
 #[command(name = "ill", about = "iLL — integration Logic Language")]
 struct Cli {
@@ -41,7 +45,7 @@ fn run_test(paths: &[PathBuf]) {
         for p in paths {
             if p.is_dir() {
                 all.extend(collect_ill_files(p));
-            } else if p.extension().and_then(|s| s.to_str()) != Some(ILL_EXTENSION) {
+            } else if !is_ill_file(p) {
                 eprintln!("ill: skipping {}: not a .ill file", p.display());
             } else {
                 all.push(p.clone());
@@ -55,8 +59,8 @@ fn run_test(paths: &[PathBuf]) {
         process::exit(1);
     }
 
-    let mut passed = 0usize;
-    let mut failed = 0usize;
+    let mut passed = 0;
+    let mut failed = 0;
 
     for path in &files {
         let src = match std::fs::read_to_string(path) {
@@ -118,7 +122,7 @@ fn collect_ill_files_inner(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_ill_files_inner(&path, out);
-        } else if path.extension().and_then(|s| s.to_str()) == Some(ILL_EXTENSION) {
+        } else if is_ill_file(&path) {
             out.push(path);
         }
     }
