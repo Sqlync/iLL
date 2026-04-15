@@ -309,10 +309,7 @@ impl<'a> LowerCtx<'a> {
         for child in node.named_children(&mut cursor) {
             match child.kind() {
                 "annotation_name" => {
-                    name = Some(Ident {
-                        name: self.text(child).to_string(),
-                        span: self.span(child),
-                    });
+                    name = Some(self.ident_from_node(child));
                 }
                 "annotation_value" => {
                     // annotation_value wraps either an identifier or a string
@@ -408,11 +405,8 @@ impl<'a> LowerCtx<'a> {
                 "annotation" => {
                     annotation = self.lower_annotation(child);
                 }
-                "keyword_block" => {
-                    self.lower_keyword_block(child, &mut keyword_args);
-                }
-                "inline_keyword_args" => {
-                    self.lower_inline_keyword_args(child, &mut keyword_args);
+                "keyword_block" | "inline_keyword_args" => {
+                    self.collect_keyword_args(child, &mut keyword_args);
                 }
                 "primary_expression" | "member_expression" | "index_expression" => {
                     if let Some(expr) = self.lower_expression(child) {
@@ -434,18 +428,9 @@ impl<'a> LowerCtx<'a> {
 
     // ── Keyword args ───────────────────────────────────────────────────────
 
-    fn lower_keyword_block(&mut self, node: tree_sitter::Node, args: &mut Vec<KeywordArg>) {
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if child.kind() == "keyword_arg" {
-                if let Some(kw) = self.lower_keyword_arg(child) {
-                    args.push(kw);
-                }
-            }
-        }
-    }
-
-    fn lower_inline_keyword_args(&mut self, node: tree_sitter::Node, args: &mut Vec<KeywordArg>) {
+    /// Collect `keyword_arg` children from either a `keyword_block` (indented)
+    /// or `inline_keyword_args` (same-line) node — both have identical shape.
+    fn collect_keyword_args(&mut self, node: tree_sitter::Node, args: &mut Vec<KeywordArg>) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             if child.kind() == "keyword_arg" {
@@ -476,10 +461,7 @@ impl<'a> LowerCtx<'a> {
             KeywordValue::Map(pairs)
         } else {
             let value_node = node.child_by_field_name("value")?;
-            // value_node might be the expression itself, or it might contain
-            // INDENT/DEDENT tokens. Find the actual expression.
-            let expr = self.lower_expression_from_value(value_node)?;
-            KeywordValue::Expr(expr)
+            KeywordValue::Expr(self.lower_expression(value_node)?)
         };
 
         Some(KeywordArg {
@@ -620,10 +602,7 @@ impl<'a> LowerCtx<'a> {
 
     fn lower_primary(&mut self, node: tree_sitter::Node) -> Option<Expr> {
         match node.kind() {
-            "identifier" => Some(Expr::Ident(Ident {
-                name: self.text(node).to_string(),
-                span: self.span(node),
-            })),
+            "identifier" => Some(Expr::Ident(self.ident_from_node(node))),
             "number" => {
                 let text = self.text(node);
                 match text.parse::<i64>() {
@@ -643,11 +622,7 @@ impl<'a> LowerCtx<'a> {
             }
             "atom" => {
                 // atom is `:` + identifier
-                let ident_node = node.named_child(0)?;
-                Some(Expr::Atom(Ident {
-                    name: self.text(ident_node).to_string(),
-                    span: self.span(ident_node),
-                }))
+                Some(Expr::Atom(self.ident_from_node(node.named_child(0)?)))
             }
             "string" => self.lower_string(node),
             "sigil" => self.lower_sigil(node),
@@ -736,21 +711,26 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_string_fragments(&mut self, node: tree_sitter::Node) -> Vec<StringFragment> {
+        self.collect_fragments(node, "string_content")
+    }
+
+    /// Collect `{text_kind | interpolation}*` children into a fragment list.
+    /// Shared between strings (`string_content`) and sigils (`sigil_content`).
+    fn collect_fragments(
+        &mut self,
+        node: tree_sitter::Node,
+        text_kind: &str,
+    ) -> Vec<StringFragment> {
         let mut fragments = Vec::new();
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            match child.kind() {
-                "string_content" => {
-                    fragments.push(StringFragment::Text(self.text(child).to_string()));
+            if child.kind() == text_kind {
+                fragments.push(StringFragment::Text(self.text(child).to_string()));
+            } else if child.kind() == "interpolation" {
+                // interpolation contains one expression child
+                if let Some(expr) = child.named_child(0).and_then(|n| self.lower_expression(n)) {
+                    fragments.push(StringFragment::Interpolation(expr));
                 }
-                "interpolation" => {
-                    // interpolation contains one expression child
-                    let expr_node = child.named_child(0);
-                    if let Some(expr) = expr_node.and_then(|n| self.lower_expression(n)) {
-                        fragments.push(StringFragment::Interpolation(expr));
-                    }
-                }
-                _ => {}
             }
         }
         fragments
@@ -759,28 +739,8 @@ impl<'a> LowerCtx<'a> {
     // ── Sigils ─────────────────────────────────────────────────────────────
 
     fn lower_sigil(&mut self, node: tree_sitter::Node) -> Option<Expr> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = Ident {
-            name: self.text(name_node).to_string(),
-            span: self.span(name_node),
-        };
-
-        let mut fragments = Vec::new();
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            match child.kind() {
-                "sigil_content" => {
-                    fragments.push(StringFragment::Text(self.text(child).to_string()));
-                }
-                "interpolation" => {
-                    let expr_node = child.named_child(0);
-                    if let Some(expr) = expr_node.and_then(|n| self.lower_expression(n)) {
-                        fragments.push(StringFragment::Interpolation(expr));
-                    }
-                }
-                _ => {}
-            }
-        }
+        let name = self.ident_from_node(node.child_by_field_name("name")?);
+        let fragments = self.collect_fragments(node, "sigil_content");
 
         Some(Expr::Sigil(Sigil {
             name,
@@ -791,6 +751,14 @@ impl<'a> LowerCtx<'a> {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
+    /// Build an `Ident` from a node, using its text as the name.
+    fn ident_from_node(&self, node: tree_sitter::Node) -> Ident {
+        Ident {
+            name: self.text(node).to_string(),
+            span: self.span(node),
+        }
+    }
+
     fn lower_ident_field(&mut self, node: tree_sitter::Node, field: &str) -> Option<Ident> {
         let child = node.child_by_field_name(field).or_else(|| {
             self.errors.push(LowerError::MissingField {
@@ -800,18 +768,11 @@ impl<'a> LowerCtx<'a> {
             });
             None
         })?;
-        Some(Ident {
-            name: self.text(child).to_string(),
-            span: self.span(child),
-        })
+        Some(self.ident_from_node(child))
     }
 
     fn lower_ident_from_first_child(&mut self, node: tree_sitter::Node) -> Option<Ident> {
-        let child = node.named_child(0)?;
-        Some(Ident {
-            name: self.text(child).to_string(),
-            span: self.span(child),
-        })
+        Some(self.ident_from_node(node.named_child(0)?))
     }
 
     /// Extract plain text from a string node (strips quotes, ignores interpolation).
@@ -839,16 +800,6 @@ impl<'a> LowerCtx<'a> {
             _ => String::new(),
         }
     }
-
-    /// Lower an expression from a keyword_arg value field.
-    ///
-    /// Thin wrapper kept for readability at call sites — the value field may
-    /// point at a wrapped expression node (`primary_expression`, etc.) or at
-    /// a bare terminal (`identifier`, `string`, ...), and `lower_expression`
-    /// already handles both.
-    fn lower_expression_from_value(&mut self, node: tree_sitter::Node) -> Option<Expr> {
-        self.lower_expression(node)
-    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -869,27 +820,6 @@ mod tests {
             }
             _ => panic!("expected actor declaration"),
         }
-    }
-
-    #[test]
-    fn parse_does_not_hang() {
-        // Minimal test to verify tree-sitter parsing completes
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_ill::LANGUAGE.into())
-            .unwrap();
-        let source = std::fs::read_to_string("../../examples/container/basic.ill")
-            .expect("should read example file");
-        eprintln!("about to parse {} bytes", source.len());
-        let tree = parser.parse(&source, None).expect("parse should not fail");
-        eprintln!("parse done");
-        let root = tree.root_node();
-        eprintln!(
-            "root: {} children={}",
-            root.kind(),
-            root.named_child_count()
-        );
-        assert_eq!(root.kind(), "source_file");
     }
 
     // ── normalize() ────────────────────────────────────────────────────────
@@ -993,12 +923,15 @@ actor args = args_actor,
             }
         }
 
-        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples");
+        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let mut paths = Vec::new();
         visit(&examples_dir, &mut paths);
         paths.sort();
-        assert!(!paths.is_empty(), "found no examples under {}", examples_dir.display());
+        assert!(
+            !paths.is_empty(),
+            "found no examples under {}",
+            examples_dir.display()
+        );
 
         let mut failures = Vec::new();
         for p in &paths {
@@ -1015,7 +948,11 @@ actor args = args_actor,
                     eprintln!("  {}", e);
                 }
             }
-            panic!("{}/{} examples failed to lower", failures.len(), paths.len());
+            panic!(
+                "{}/{} examples failed to lower",
+                failures.len(),
+                paths.len()
+            );
         }
     }
 }
