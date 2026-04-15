@@ -129,6 +129,18 @@ bool tree_sitter_ill_external_scanner_scan(void *payload, TSLexer *lexer,
         continue;  // skip blank lines
       }
 
+      // If we consumed a newline followed by whitespace-only content (indent > 0)
+      // and then hit EOF, treat the line as blank and fall through to the EOF
+      // DEDENT handler below. Emitting NEWLINE here would leave the grammar
+      // expecting another statement when none exists, causing a parse error.
+      //
+      // We only suppress when indent > 0 so that a bare trailing newline
+      // (e.g. "actor foo = bar\n") at the top level (indent == 0, cur == 0)
+      // still emits the NEWLINE that source_file's repeat expects.
+      if (lexer->eof(lexer) && indent > 0) {
+        break;
+      }
+
       // We have the indent of the next meaningful line.
       uint16_t cur = current_indent(scanner);
 

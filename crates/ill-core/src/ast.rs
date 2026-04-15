@@ -73,13 +73,22 @@ pub enum Statement {
     Command(Command),
     Assert(Assert),
     Let(Let),
+    Assignment(Assignment),
 }
 
 #[derive(Debug, Clone)]
 pub struct Command {
+    pub annotation: Option<Annotation>,
     pub name: Ident,
     pub positional_args: Vec<Expr>,
     pub keyword_args: Vec<KeywordArg>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct Assignment {
+    pub target: Expr,
+    pub value: Expr,
     pub span: Span,
 }
 

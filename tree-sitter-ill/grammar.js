@@ -64,6 +64,7 @@ module.exports = grammar({
         repeat($.annotation),
         field("name", $.identifier),
         optional(seq(":", field("default", $._expression))),
+        optional(","),
       ),
 
     // ─── Annotations ───────────────────────────────────────────────────

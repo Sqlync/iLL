@@ -65,6 +65,38 @@ impl std::fmt::Display for LowerError {
 
 impl std::error::Error for LowerError {}
 
+// ── Input normalization ────────────────────────────────────────────────────────
+
+/// Normalize source text before handing it to tree-sitter.
+///
+/// Handles common real-world messiness:
+/// - Windows (`\r\n`) and old-Mac (`\r`) line endings → `\n`
+/// - Tabs → two spaces (matching the scanner's `TAB_WIDTH = 2`)
+/// - Trailing whitespace on every line (prevents spurious NEWLINE tokens at EOF)
+/// - Ensures the file ends with exactly one newline
+pub fn normalize(src: &str) -> String {
+    // Normalise line endings first so split('\n') works uniformly.
+    let s = src.replace("\r\n", "\n").replace('\r', "\n");
+
+    let mut result = String::with_capacity(s.len() + 1);
+    for line in s.split('\n') {
+        // Expand tabs to two spaces (matching scanner TAB_WIDTH).
+        let expanded = line.replace('\t', "  ");
+        // Strip trailing spaces/tabs from each line.
+        result.push_str(expanded.trim_end());
+        result.push('\n');
+    }
+
+    // split('\n') on "a\nb\n" yields ["a", "b", ""], so the trailing empty
+    // element produces an extra '\n'. Collapse any run of trailing newlines
+    // down to exactly one.
+    while result.ends_with("\n\n") {
+        result.pop();
+    }
+
+    result
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
@@ -73,25 +105,14 @@ pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
         .set_language(&tree_sitter_ill::LANGUAGE.into())
         .expect("failed to load tree-sitter-ill grammar");
 
-    // Ensure the source ends with a blank line. The external scanner handles
-    // trailing newlines through the normal indentation path, which terminates
-    // cleanly. Without this, the scanner can loop at EOF in the Rust runtime.
-    let owned;
-    let src: &str = if source.ends_with("\n\n") {
-        source
-    } else if source.ends_with('\n') {
-        owned = format!("{source}\n");
-        &owned
-    } else {
-        owned = format!("{source}\n\n");
-        &owned
-    };
-
-    let tree = parser.parse(src, None).expect("tree-sitter parse failed");
+    let normalized = normalize(source);
+    let tree = parser
+        .parse(&normalized, None)
+        .expect("tree-sitter parse failed");
     let root = tree.root_node();
 
     let mut ctx = LowerCtx {
-        source: src,
+        source: &normalized,
         errors: Vec::new(),
     };
 
@@ -357,6 +378,11 @@ impl<'a> LowerCtx<'a> {
                         stmts.push(Statement::Let(l));
                     }
                 }
+                "assignment_statement" => {
+                    if let Some(a) = self.lower_assignment(child) {
+                        stmts.push(Statement::Assignment(a));
+                    }
+                }
                 "INDENT" | "DEDENT" | "NEWLINE" | "comment" => {}
                 _ => {
                     self.errors.push(LowerError::UnexpectedNode {
@@ -372,12 +398,16 @@ impl<'a> LowerCtx<'a> {
 
     fn lower_command(&mut self, node: tree_sitter::Node) -> Option<Command> {
         let name = self.lower_ident_field(node, "name")?;
+        let mut annotation = None;
         let mut positional_args = Vec::new();
         let mut keyword_args = Vec::new();
 
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             match child.kind() {
+                "annotation" => {
+                    annotation = self.lower_annotation(child);
+                }
                 "keyword_block" => {
                     self.lower_keyword_block(child, &mut keyword_args);
                 }
@@ -394,6 +424,7 @@ impl<'a> LowerCtx<'a> {
         }
 
         Some(Command {
+            annotation,
             name,
             positional_args,
             keyword_args,
@@ -546,6 +577,20 @@ impl<'a> LowerCtx<'a> {
         let format = self.lower_ident_field(node, "format")?;
         let source = self.lower_expression(source_node)?;
         Some(LetValue::Parse { source, format })
+    }
+
+    // ── Assignment ─────────────────────────────────────────────────────────
+
+    fn lower_assignment(&mut self, node: tree_sitter::Node) -> Option<Assignment> {
+        let target_node = node.child_by_field_name("target")?;
+        let target = self.lower_expression(target_node)?;
+        let value_node = node.child_by_field_name("value")?;
+        let value = self.lower_expression(value_node)?;
+        Some(Assignment {
+            target,
+            value,
+            span: self.span(node),
+        })
     }
 
     // ── Expressions ────────────────────────────────────────────────────────
@@ -852,5 +897,88 @@ mod tests {
             root.named_child_count()
         );
         assert_eq!(root.kind(), "source_file");
+    }
+
+    // ── normalize() ────────────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_crlf() {
+        assert_eq!(normalize("a\r\nb\r\nc\r\n"), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn normalize_bare_cr() {
+        assert_eq!(normalize("a\rb\rc\r"), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn normalize_trailing_spaces() {
+        assert_eq!(normalize("a  \nb  \n"), "a\nb\n");
+    }
+
+    #[test]
+    fn normalize_no_trailing_newline() {
+        assert_eq!(normalize("a\nb"), "a\nb\n");
+    }
+
+    #[test]
+    fn normalize_multiple_trailing_newlines() {
+        assert_eq!(normalize("a\n\n\n"), "a\n");
+    }
+
+    #[test]
+    fn normalize_tabs() {
+        // Two-space expansion matching scanner TAB_WIDTH = 2
+        assert_eq!(normalize("\tcmd"), "  cmd\n");
+    }
+
+    #[test]
+    fn normalize_preserves_internal_blank_lines() {
+        assert_eq!(normalize("a\n\nb\n"), "a\n\nb\n");
+    }
+
+    // ── Messy input round-trips through lower() ────────────────────────────
+
+    #[test]
+    fn lower_crlf_source() {
+        let source = "actor db = container\r\n";
+        lower(source).expect("CRLF source should lower cleanly");
+    }
+
+    #[test]
+    fn lower_no_trailing_newline() {
+        let source = "actor db = container";
+        lower(source).expect("source without trailing newline should lower cleanly");
+    }
+
+    #[test]
+    fn lower_trailing_whitespace_line() {
+        // A file that ends with a whitespace-only line — the bug that broke
+        // readme.ill's `as bob:` block before the scanner fix.
+        let source = "actor db = container\n  ";
+        lower(source).expect("trailing whitespace line should lower cleanly");
+    }
+
+    // ── Trailing commas in vars: ────────────────────────────────────────────
+
+    #[test]
+    fn lower_vars_trailing_commas() {
+        let source = "\
+actor args = args_actor,
+  vars:
+    required,
+    optional_a: \"foo\",
+    optional_b: \"bar\",
+";
+        let file = lower(source).expect("trailing commas in vars should lower cleanly");
+        match &file.items[0] {
+            TopLevel::ActorDeclaration(decl) => {
+                assert_eq!(decl.vars.len(), 3);
+                assert_eq!(decl.vars[0].name.name, "required");
+                assert_eq!(decl.vars[1].name.name, "optional_a");
+                assert_eq!(decl.vars[2].name.name, "optional_b");
+            }
+            _ => panic!("expected actor declaration"),
+        }
     }
 }
