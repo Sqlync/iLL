@@ -14,9 +14,7 @@
 use std::collections::HashMap;
 
 use crate::actor_type::{ActorType, KeywordArgDef, Mode, ValueType};
-use crate::ast::{
-    self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel,
-};
+use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
 
@@ -123,9 +121,9 @@ impl<'r> Validator<'r> {
             return;
         }
 
-        // Track the last command's result/error shape for assert/let resolution.
+        // Track the last command's ok result shape for `let x = ok.*` resolution.
+        // `error.*` binding support isn't wired yet; add it when a real case needs it.
         let mut last_ok: ValueType = ValueType::Unknown;
-        let mut last_err: ValueType = ValueType::Unknown;
 
         for (idx, stmt) in block.body.iter().enumerate() {
             match stmt {
@@ -134,14 +132,13 @@ impl<'r> Validator<'r> {
                     // on `error.*` is on the failure branch — don't apply the
                     // success-path mode transition.
                     let on_error_branch = asserts_error_before_next_command(&block.body, idx);
-                    let (ok, err) = self.check_command(&block.actor.name, cmd, !on_error_branch);
+                    let (ok, _err) = self.check_command(&block.actor.name, cmd, !on_error_branch);
                     last_ok = ok;
-                    last_err = err;
                 }
                 Statement::Let(let_stmt) => {
                     let ty = match &let_stmt.value {
                         ast::LetValue::Expr(expr) => {
-                            self.expr_type_in_actor(&block.actor.name, expr, last_ok, last_err)
+                            self.expr_type_in_actor(&block.actor.name, expr, last_ok)
                         }
                         ast::LetValue::Parse { format, .. } => match format.name.as_str() {
                             "json" => ValueType::Json,
@@ -302,13 +299,7 @@ impl<'r> Validator<'r> {
 
     // ── Expression typing (narrow) ────────────────────────────────────────────
 
-    fn expr_type_in_actor(
-        &self,
-        actor_name: &str,
-        expr: &Expr,
-        last_ok: ValueType,
-        _last_err: ValueType,
-    ) -> ValueType {
+    fn expr_type_in_actor(&self, actor_name: &str, expr: &Expr, last_ok: ValueType) -> ValueType {
         match expr {
             Expr::Ident(ident) => {
                 // `ok` is a keyword-ish binding set by the last command.
@@ -355,17 +346,7 @@ fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
 /// Context-free expression type — good enough for literals and simple forms.
 fn expr_type(expr: &Expr) -> ValueType {
     match expr {
-        Expr::StringLit(s) => {
-            // Pure string literals are String; interpolated ones still are.
-            if s.fragments
-                .iter()
-                .all(|f| matches!(f, StringFragment::Text(_)))
-            {
-                ValueType::String
-            } else {
-                ValueType::String
-            }
-        }
+        Expr::StringLit(_) => ValueType::String,
         Expr::Number(_) => ValueType::Number,
         Expr::Bool(_) => ValueType::Bool,
         Expr::Atom(_) => ValueType::Atom,

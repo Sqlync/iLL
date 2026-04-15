@@ -45,8 +45,8 @@ impl Registry {
         self.actors.get(name).copied()
     }
 
-    pub fn actor_names(&self) -> impl Iterator<Item = &&'static str> {
-        self.actors.keys()
+    pub fn actor_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.actors.keys().copied()
     }
 
     /// Assert every command's referenced modes belong to its actor type.
