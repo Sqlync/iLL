@@ -130,9 +130,6 @@ module.exports = grammar({
 
     _keyword_section: ($) => choice($.keyword_block, $.inline_keyword_args),
 
-    _positional_arg_list: ($) =>
-      seq($._expression, repeat(seq(",", $._expression))),
-
     // Indented keyword block
     keyword_block: ($) =>
       seq($.INDENT, repeat($.NEWLINE), $._keyword_list, $.DEDENT),

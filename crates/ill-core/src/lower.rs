@@ -841,20 +841,13 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Lower an expression from a keyword_arg value field.
-    /// The value field may point directly to an expression node, or it may
-    /// be one of the structural nodes we need to skip past.
+    ///
+    /// Thin wrapper kept for readability at call sites — the value field may
+    /// point at a wrapped expression node (`primary_expression`, etc.) or at
+    /// a bare terminal (`identifier`, `string`, ...), and `lower_expression`
+    /// already handles both.
     fn lower_expression_from_value(&mut self, node: tree_sitter::Node) -> Option<Expr> {
-        match node.kind() {
-            "primary_expression" | "member_expression" | "index_expression" | "identifier"
-            | "string" | "number" | "boolean" | "atom" | "array" | "sigil" => {
-                self.lower_expression(node)
-            }
-            _ => {
-                // The value field might point to a node we don't recognize as
-                // an expression — try treating it as one anyway.
-                self.lower_expression(node)
-            }
-        }
+        self.lower_expression(node)
     }
 }
 
@@ -979,6 +972,50 @@ actor args = args_actor,
                 assert_eq!(decl.vars[2].name.name, "optional_b");
             }
             _ => panic!("expected actor declaration"),
+        }
+    }
+
+    // ── Corpus smoke test ───────────────────────────────────────────────────
+
+    /// Every `.ill` file under examples/ must parse cleanly and lower to an
+    /// error-free AST. Catches grammar/scanner/lowering regressions across
+    /// the whole corpus in one shot.
+    #[test]
+    fn all_examples_lower_cleanly() {
+        fn visit(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    visit(&p, out);
+                } else if p.extension().and_then(|s| s.to_str()) == Some("ill") {
+                    out.push(p);
+                }
+            }
+        }
+
+        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples");
+        let mut paths = Vec::new();
+        visit(&examples_dir, &mut paths);
+        paths.sort();
+        assert!(!paths.is_empty(), "found no examples under {}", examples_dir.display());
+
+        let mut failures = Vec::new();
+        for p in &paths {
+            let src = std::fs::read_to_string(p).expect("read example");
+            if let Err(errs) = lower(&src) {
+                failures.push((p.clone(), errs));
+            }
+        }
+
+        if !failures.is_empty() {
+            for (p, errs) in &failures {
+                eprintln!("FAIL {} ({} errors)", p.display(), errs.len());
+                for e in errs.iter().take(3) {
+                    eprintln!("  {}", e);
+                }
+            }
+            panic!("{}/{} examples failed to lower", failures.len(), paths.len());
         }
     }
 }
