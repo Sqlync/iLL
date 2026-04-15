@@ -1,37 +1,46 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+use clap::{Parser, Subcommand};
 
-    match args.get(1).map(String::as_str) {
-        Some("test") => {
-            let paths: Vec<&str> = args[2..].iter().map(String::as_str).collect();
-            run_test(&paths);
-        }
-        Some(cmd) => {
-            eprintln!("ill: unknown command `{cmd}`");
-            eprintln!("usage: ill test [paths...]");
-            process::exit(1);
-        }
-        None => {
-            eprintln!("usage: ill test [paths...]");
-            process::exit(1);
-        }
+#[derive(Parser)]
+#[command(name = "ill", about = "iLL — integration Logic Language")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Parse .ill files and print their ASTs.
+    ///
+    /// Accepts any number of files and/or directories. Directories are searched
+    /// recursively for .ill files. With no arguments, searches the current
+    /// directory recursively.
+    Test {
+        /// Files or directories to test. Defaults to the current directory.
+        paths: Vec<PathBuf>,
+    },
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Test { paths } => run_test(&paths),
     }
 }
 
-fn run_test(paths: &[&str]) {
+fn run_test(paths: &[PathBuf]) {
     let files = if paths.is_empty() {
         collect_ill_files(Path::new("."))
     } else {
         let mut all = Vec::new();
         for p in paths {
-            let path = Path::new(p);
-            if path.is_dir() {
-                all.extend(collect_ill_files(path));
+            if p.is_dir() {
+                all.extend(collect_ill_files(p));
             } else {
-                all.push(path.to_path_buf());
+                all.push(p.clone());
             }
         }
         all

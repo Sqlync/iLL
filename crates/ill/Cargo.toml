@@ -11,3 +11,4 @@ path = "src/main.rs"
 
 [dependencies]
 ill-core = { path = "../ill-core" }
+clap = { version = "4", features = ["derive"] }
