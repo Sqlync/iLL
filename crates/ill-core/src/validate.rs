@@ -27,6 +27,22 @@ struct ActorState {
     vars: HashMap<String, ValueType>,
 }
 
+/// Outcome state for the command currently being processed in an `as` block.
+/// Starts as `ImpliedOk` (no asserts seen), transitions on `assert ok.*` /
+/// `assert error.*`, and flags a diagnostic if both are seen.
+#[derive(Clone, Copy)]
+enum CommandOutcome {
+    ImpliedOk,
+    ExplicitOk,
+    ExplicitError,
+}
+
+impl CommandOutcome {
+    fn is_ok(self) -> bool {
+        matches!(self, CommandOutcome::ImpliedOk | CommandOutcome::ExplicitOk)
+    }
+}
+
 struct Validator<'r> {
     registry: &'r Registry,
     actors: HashMap<String, ActorState>,
@@ -122,18 +138,35 @@ impl<'r> Validator<'r> {
         }
 
         // Track the last command's ok result shape for `let x = ok.*` resolution.
-        // `error.*` binding support isn't wired yet; add it when a real case needs it.
         let mut last_ok: ValueType = ValueType::Unknown;
 
-        for (idx, stmt) in block.body.iter().enumerate() {
+        // Outcome state for the current command window. Reset on each command;
+        // updated as ok/error asserts are encountered. Used to determine whether
+        // to apply the mode transition and to flag ok/error mixing.
+        let mut outcome = CommandOutcome::ImpliedOk;
+
+        // Pending mode transition from the last command. Applied when the next
+        // command is encountered (by which point we know the outcome), or at
+        // end of block.
+        let mut pending_transition: Option<&'static dyn Mode> = None;
+
+        for stmt in &block.body {
             match stmt {
                 Statement::Command(cmd) => {
-                    // A command followed (before the next command) by an assert
-                    // on `error.*` is on the failure branch — don't apply the
-                    // success-path mode transition.
-                    let on_error_branch = asserts_error_before_next_command(&block.body, idx);
-                    let (ok, _) = self.check_command(&block.actor.name, cmd, !on_error_branch);
+                    // Apply the pending transition from the previous command,
+                    // but only if that command's outcome was ok.
+                    if outcome.is_ok() {
+                        if let Some(next_mode) = pending_transition {
+                            if let Some(state) = self.actors.get_mut(&block.actor.name) {
+                                state.mode = next_mode;
+                            }
+                        }
+                    }
+                    outcome = CommandOutcome::ImpliedOk;
+
+                    let (ok, _, transition) = self.check_command(&block.actor.name, cmd);
                     last_ok = ok;
+                    pending_transition = transition;
                 }
                 Statement::Let(let_stmt) => {
                     let ty = match &let_stmt.value {
@@ -153,9 +186,37 @@ impl<'r> Validator<'r> {
                     // TODO: check target var exists, check mutability annotation,
                     // check type. Deferred — needs annotation semantics nailed down.
                 }
-                Statement::Assert(_) => {
+                Statement::Assert(a) => {
+                    let asserts_ok = expr_starts_with_ident(&a.left, "ok");
+                    let asserts_error = expr_starts_with_ident(&a.left, "error");
+
+                    if asserts_ok || asserts_error {
+                        outcome = match (outcome, asserts_ok) {
+                            (CommandOutcome::ImpliedOk, true) => CommandOutcome::ExplicitOk,
+                            (CommandOutcome::ImpliedOk, false) => CommandOutcome::ExplicitError,
+                            (CommandOutcome::ExplicitOk, false)
+                            | (CommandOutcome::ExplicitError, true) => {
+                                self.diagnostics.push(Diagnostic::error(
+                                    a.span,
+                                    DiagnosticCode::ConflictingOutcomeAsserts,
+                                    "cannot assert both `ok` and `error` for the same command",
+                                ));
+                                outcome // leave unchanged after conflict
+                            }
+                            (o, _) => o, // already conflicted or same direction
+                        };
+                    }
                     // TODO: check both sides type-check and are comparable.
                     // Deferred — low-value for Phase 4, high-noise potential.
+                }
+            }
+        }
+
+        // Apply the pending transition for the final command in the block.
+        if outcome.is_ok() {
+            if let Some(next_mode) = pending_transition {
+                if let Some(state) = self.actors.get_mut(&block.actor.name) {
+                    state.mode = next_mode;
                 }
             }
         }
@@ -163,20 +224,16 @@ impl<'r> Validator<'r> {
 
     // ── Commands ──────────────────────────────────────────────────────────────
 
-    /// Returns `(ok_type, error_type)` for the command, used by following
-    /// `let`/`assert` statements that reference `ok.*` / `error.*`.
-    ///
-    /// `apply_transition` is false when the caller has determined this command
-    /// is on the error branch (asserted via `error.*`), in which case the
-    /// success-path mode transition must not happen.
+    /// Returns `(ok_type, error_type, pending_transition)` for the command.
+    /// The transition is returned rather than applied so the caller can defer
+    /// it until the command's outcome is known from following asserts.
     fn check_command(
         &mut self,
         actor_name: &str,
         cmd: &ast::Command,
-        apply_transition: bool,
-    ) -> (ValueType, ValueType) {
+    ) -> (ValueType, ValueType, Option<&'static dyn Mode>) {
         let Some(state) = self.actors.get(actor_name) else {
-            return (ValueType::Unknown, ValueType::Unknown);
+            return (ValueType::Unknown, ValueType::Unknown, None);
         };
         let type_def = state.type_def;
         let current_mode = state.mode;
@@ -191,7 +248,7 @@ impl<'r> Validator<'r> {
                     type_def.name()
                 ),
             ));
-            return (ValueType::Unknown, ValueType::Unknown);
+            return (ValueType::Unknown, ValueType::Unknown, None);
         };
 
         // Mode check
@@ -211,7 +268,7 @@ impl<'r> Validator<'r> {
                     expected.join(", "),
                 ),
             ));
-            return (ValueType::Unknown, ValueType::Unknown);
+            return (ValueType::Unknown, ValueType::Unknown, None);
         }
 
         // Required positional args (presence only for now).
@@ -237,16 +294,7 @@ impl<'r> Validator<'r> {
             Some(&cmd.name.name),
         );
 
-        // Apply mode transition unless the caller marked this as the error branch.
-        if apply_transition {
-            if let Some(next) = cmd_def.transitions_to() {
-                if let Some(state) = self.actors.get_mut(actor_name) {
-                    state.mode = next;
-                }
-            }
-        }
-
-        (cmd_def.result_type(), cmd_def.error_type())
+        (cmd_def.result_type(), cmd_def.error_type(), cmd_def.transitions_to())
     }
 
     fn check_keyword_args_against(
@@ -315,22 +363,6 @@ impl<'r> Validator<'r> {
             _ => expr_type(expr),
         }
     }
-}
-
-/// True if the command at `cmd_idx` is followed (before any later command)
-/// by an assert whose left-hand side starts with the `error` identifier.
-///
-/// This lets the validator stay on the failure branch rather than naively
-/// advancing the mode as if the command had succeeded.
-fn asserts_error_before_next_command(body: &[Statement], cmd_idx: usize) -> bool {
-    for stmt in &body[cmd_idx + 1..] {
-        match stmt {
-            Statement::Command(_) => return false,
-            Statement::Assert(a) if expr_starts_with_ident(&a.left, "error") => return true,
-            _ => {}
-        }
-    }
-    false
 }
 
 fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
@@ -531,6 +563,23 @@ as alice:
         assert_eq!(
             codes(&diags(src)),
             vec![DiagnosticCode::CommandNotValidInMode]
+        );
+    }
+
+    #[test]
+    fn conflicting_outcome_asserts_is_flagged() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  assert ok.rows == 1
+  assert error.code == 2
+";
+        assert_eq!(
+            codes(&diags(src)),
+            vec![DiagnosticCode::ConflictingOutcomeAsserts]
         );
     }
 }

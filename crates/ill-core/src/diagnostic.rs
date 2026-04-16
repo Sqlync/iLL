@@ -27,6 +27,7 @@ pub enum DiagnosticCode {
     CommandNotValidInMode,
     MissingRequiredArg,
     UnknownKeywordArg,
+    ConflictingOutcomeAsserts,
 
     // Types (narrow scope for Phase 4)
     TypeMismatch,
