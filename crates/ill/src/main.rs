@@ -3,6 +3,8 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
+use ill_core::diagnostic::Severity;
+
 const ILL_EXTENSION: &str = "ill";
 
 fn is_ill_file(path: &Path) -> bool {
@@ -47,22 +49,29 @@ fn main() {
     }
 }
 
-fn run_test(paths: &[PathBuf]) {
-    let files = if paths.is_empty() {
-        collect_ill_files(Path::new("."))
-    } else {
-        let mut all = Vec::new();
-        for p in paths {
-            if p.is_dir() {
-                all.extend(collect_ill_files(p));
-            } else if !is_ill_file(p) {
-                eprintln!("ill: skipping {}: not a .ill file", p.display());
-            } else {
-                all.push(p.clone());
-            }
+/// Resolve a list of user-supplied paths into a sorted list of .ill files.
+/// Directories are searched recursively. Non-.ill files are skipped with a warning.
+/// Returns an empty Vec if nothing was found (callers decide how to handle that).
+fn resolve_files(paths: &[PathBuf]) -> Vec<PathBuf> {
+    if paths.is_empty() {
+        return collect_ill_files(Path::new("."));
+    }
+
+    let mut all = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            all.extend(collect_ill_files(p));
+        } else if !is_ill_file(p) {
+            eprintln!("ill: skipping {}: not a .ill file", p.display());
+        } else {
+            all.push(p.clone());
         }
-        all
-    };
+    }
+    all
+}
+
+fn run_test(paths: &[PathBuf]) {
+    let files = resolve_files(paths);
 
     if files.is_empty() {
         eprintln!("ill: no .ill files found");
@@ -87,7 +96,7 @@ fn run_test(paths: &[PathBuf]) {
                 let diags = ill_core::validate::validate(&ast);
                 let errors: Vec<_> = diags
                     .iter()
-                    .filter(|d| d.severity == ill_core::diagnostic::Severity::Error)
+                    .filter(|d| d.severity == Severity::Error)
                     .collect();
                 if errors.is_empty() {
                     passed += 1;
@@ -117,21 +126,7 @@ fn run_test(paths: &[PathBuf]) {
 }
 
 fn run_check(paths: &[PathBuf]) {
-    let files = if paths.is_empty() {
-        collect_ill_files(Path::new("."))
-    } else {
-        let mut all = Vec::new();
-        for p in paths {
-            if p.is_dir() {
-                all.extend(collect_ill_files(p));
-            } else if !is_ill_file(p) {
-                eprintln!("ill: skipping {}: not a .ill file", p.display());
-            } else {
-                all.push(p.clone());
-            }
-        }
-        all
-    };
+    let files = resolve_files(paths);
 
     if files.is_empty() {
         eprintln!("ill: no .ill files found");
@@ -140,6 +135,8 @@ fn run_check(paths: &[PathBuf]) {
 
     let mut error_count = 0;
     let mut warning_count = 0;
+    let mut info_count = 0;
+    let mut hint_count = 0;
 
     for path in &files {
         let src = match std::fs::read_to_string(path) {
@@ -157,9 +154,10 @@ fn run_check(paths: &[PathBuf]) {
                 for d in &diags {
                     eprintln!("{}: {d}", path.display());
                     match d.severity {
-                        ill_core::diagnostic::Severity::Error => error_count += 1,
-                        ill_core::diagnostic::Severity::Warning => warning_count += 1,
-                        _ => {}
+                        Severity::Error => error_count += 1,
+                        Severity::Warning => warning_count += 1,
+                        Severity::Info => info_count += 1,
+                        Severity::Hint => hint_count += 1,
                     }
                 }
             }
@@ -175,7 +173,7 @@ fn run_check(paths: &[PathBuf]) {
     let file_count = files.len();
     let file_word = if file_count == 1 { "file" } else { "files" };
 
-    if error_count == 0 && warning_count == 0 {
+    if error_count == 0 && warning_count == 0 && info_count == 0 && hint_count == 0 {
         println!("ok — {file_count} {file_word} checked");
     } else {
         let mut parts = Vec::new();
@@ -186,6 +184,13 @@ fn run_check(paths: &[PathBuf]) {
         if warning_count > 0 {
             let word = if warning_count == 1 { "warning" } else { "warnings" };
             parts.push(format!("{warning_count} {word}"));
+        }
+        if info_count > 0 {
+            parts.push(format!("{info_count} info"));
+        }
+        if hint_count > 0 {
+            let word = if hint_count == 1 { "hint" } else { "hints" };
+            parts.push(format!("{hint_count} {word}"));
         }
         println!("{} in {file_count} {file_word}", parts.join(", "));
     }
