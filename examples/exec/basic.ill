@@ -1,0 +1,24 @@
+# basic exec example
+#
+# demonstrates running a long-running process on the host (no container)
+# and interacting with it from another actor.
+#
+# exec is for long-running things like servers, daemons, and brokers.
+# run-to-completion commands (build tools, migrations) aren't the intended
+# use — nothing stops you, but side effects aren't reasoned about.
+
+actor server = exec,
+  command: "./bin/my-api"
+  vars:
+    @access read
+    port: 8080
+actor client = http_client
+
+as server:
+  run,
+    env:
+      PORT: "${self.port}"
+
+as client:
+  get "http://localhost:${server.port}/health"
+  assert ok.status == 200
