@@ -1,11 +1,10 @@
 # basic exec example
 #
-# demonstrates running a long-running process on the host (no container)
-# and interacting with it from another actor.
+# demonstrates starting a long-running process on the host.
 #
 # exec is for long-running things like servers, daemons, and brokers.
 # run-to-completion commands (build tools, migrations) aren't the intended
-# use — nothing stops you, but side effects aren't reasoned about.
+# use — nothing stops you, but side effects aren't contained.
 
 actor server = exec,
   command: "python3 -m http.server ${self.port}"
@@ -15,4 +14,3 @@ actor server = exec,
 
 as server:
   run
-  stop
