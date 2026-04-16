@@ -59,3 +59,8 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 ## Phase 7: Cleanup
 
 - [ ] remove all reference to phases and any other roadmap details
+
+## Deferred
+Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
+
+- [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)

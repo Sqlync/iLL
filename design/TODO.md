@@ -14,6 +14,7 @@
 
 "exec" actor partial implementation
 - [ ] integrate exec into completed phases (grammar if needed, validation rules, error shape `error.exec.reason`)
+- [ ] path resolution rules: bare names (no `/`) look up via PATH; relative paths resolve from the `.ill` file's directory; absolute paths used as-is; `cwd:` override sets the spawned process's working directory and is itself resolved relative to the test file
 
 
 ## Eventually
