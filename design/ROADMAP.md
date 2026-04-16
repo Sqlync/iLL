@@ -30,7 +30,7 @@ Mode checking, name resolution (does this actor exist?), type checking (is this 
 - [x] Per-actor command validation (valid commands, required args, argument types)
 - [x] Per-actor mode tracking (e.g. must connect before query)
 - [x] Expression type checking
-- [ ] `ill check` command
+- [x] `ill check` command
 
 ## Phase 5: Interpreter / Runtime
 Actually execute the validated AST. Start postgres, run queries, check assertions.

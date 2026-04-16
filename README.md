@@ -27,6 +27,17 @@ Actors have member variables, much like classes or structs in other languages. T
 
 Different actor types (ex: postgres client, bash, mqtt, etc.) offer different actions depending on what "mode" they are in. For example, a postgres client may be in a "disconnected" mode and unable to run queries until it connects to a postgres server, at which point it will be in a "connected" mode and able to run queries. The iLL compiler is aware of this transition and can provide useful functionality like catching errors at compile time and providing hints to IDEs.
 
+## Usage
+
+```
+ill test [paths...]   Run .ill test files and report pass/fail
+ill check [paths...]  Validate .ill files without running them
+```
+
+Both commands accept any mix of files and directories. Directories are searched recursively for `.ill` files. With no arguments, the current directory is searched.
+
+`ill check` reports all diagnostics (errors, warnings, hints) and exits non-zero if there are any errors. It's useful for CI linting or editor integration before a full test run.
+
 ## Examples
 
 Each `.ill` file is a single test. The following systems are currently targeted and have examples:
