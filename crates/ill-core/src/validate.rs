@@ -237,10 +237,8 @@ impl<'r> Validator<'r> {
             Some(&cmd.name.name),
         );
 
-        // Apply mode transition only if: (1) the command was valid in the
-        // current mode (otherwise we'd compound errors on bogus state), and
-        // (2) the caller didn't mark this as the error branch.
-        if in_valid_mode && apply_transition {
+        // Apply mode transition unless the caller marked this as the error branch.
+        if apply_transition {
             if let Some(next) = cmd_def.transitions_to() {
                 if let Some(state) = self.actors.get_mut(actor_name) {
                     state.mode = next;
@@ -281,7 +279,7 @@ impl<'r> Validator<'r> {
         // Missing required kwargs
         for def in expected {
             if def.required && !provided.iter().any(|kw| kw.key.name == def.name) {
-                let span = provided.first().map(|kw| kw.span).unwrap_or(fallback_span);
+                let span = fallback_span;
                 let msg = match command_context {
                     Some(cmd) => format!(
                         "command `{}` missing required keyword arg `{}`",
@@ -434,10 +432,7 @@ as alice:
     user: \"u\"
 ";
         // missing `database`
-        let ds = diags(src);
-        assert!(ds
-            .iter()
-            .any(|d| d.code == DiagnosticCode::MissingRequiredArg));
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::MissingRequiredArg]);
     }
 
     #[test]
@@ -450,10 +445,7 @@ as alice:
     database: \"d\"
     bogus: 1
 ";
-        let ds = diags(src);
-        assert!(ds
-            .iter()
-            .any(|d| d.code == DiagnosticCode::UnknownKeywordArg));
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownKeywordArg]);
     }
 
     #[test]

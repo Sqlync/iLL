@@ -1,5 +1,5 @@
 use super::modes::{CONNECTED, DISCONNECTED};
-use crate::actor_type::{Command, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, ValueType};
 
 pub struct Connect;
 
@@ -60,8 +60,7 @@ impl Command for Query {
         VALID
     }
 
-    fn positional(&self) -> &'static [crate::actor_type::ArgDef] {
-        use crate::actor_type::ArgDef;
+    fn positional(&self) -> &'static [ArgDef] {
         const POSITIONAL: &[ArgDef] = &[ArgDef {
             name: "sql",
             ty: ValueType::String,
