@@ -4,7 +4,7 @@
 # assertions. this is the rest equivalent of mqtt's user_properties example.
 
 actor api = container,
-  file: "./api.Dockerfile"
+  dockerfile: "./api.Dockerfile"
   vars:
     @access read
     base: "http://localhost:8080"

@@ -8,7 +8,7 @@
 actor db = container,
   image: "postgres:18"
 actor api = container,
-  file: "./my-api.Dockerfile"
+  dockerfile: "./my-api.Dockerfile"
 actor alice = http_client,
   # actors can have member variables
   vars:

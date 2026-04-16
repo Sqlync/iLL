@@ -28,17 +28,12 @@ impl ActorType for Container {
     }
 
     fn constructor_keyword(&self) -> &'static [KeywordArgDef] {
-        // Exactly one of `image` / `file` / `dockerfile` should ultimately be
-        // required; Phase 4 accepts any of them (or none, for declarations that
-        // are purely parameterized). Tighten once the grammar settles.
+        // Exactly one of `image` or `dockerfile` should ultimately be required;
+        // Phase 4 accepts either (or neither, for purely parameterized declarations).
+        // Tighten once the grammar settles.
         &[
             KeywordArgDef {
                 name: "image",
-                ty: ValueType::String,
-                required: false,
-            },
-            KeywordArgDef {
-                name: "file",
                 ty: ValueType::String,
                 required: false,
             },

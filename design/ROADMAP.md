@@ -26,10 +26,11 @@ Define Rust data structures for the language and lower the tree-sitter CST into 
 ## Phase 4: Validation Pass
 Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Actor-specific command and mode definitions live here, making actor types pluggable.
 
-- [ ] Name resolution (actor declarations → as block references)
-- [ ] Per-actor command validation (valid commands, required args, argument types)
-- [ ] Per-actor mode tracking (e.g. must connect before query)
-- [ ] Expression type checking
+- [x] Name resolution (actor declarations → as block references)
+- [x] Per-actor command validation (valid commands, required args, argument types)
+- [x] Per-actor mode tracking (e.g. must connect before query)
+- [x] Expression type checking
+- [ ] `ill check` command
 
 ## Phase 5: Interpreter / Runtime
 Actually execute the validated AST. Start postgres, run queries, check assertions.

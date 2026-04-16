@@ -1,5 +1,5 @@
 actor api = container,
-  file: "./api.Dockerfile"
+  dockerfile: "./api.Dockerfile"
   vars:
     @access read
     base: "http://localhost:8080"
