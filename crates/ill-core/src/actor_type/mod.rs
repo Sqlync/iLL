@@ -46,7 +46,9 @@ pub enum ValueType {
     Bool,
     Atom,
     Bytes,
-    Json,
+    /// A structured runtime value produced by parsing (json, protobuf, etc.).
+    /// The shape is not statically known to the validator.
+    Dynamic,
     /// Escape hatch for expressions whose type can't be resolved yet.
     /// Prefer this over inventing a wrong type.
     Unknown,

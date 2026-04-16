@@ -200,7 +200,7 @@ impl<'r> Validator<'r> {
                             )
                         }
                         ast::LetValue::Parse { format, .. } => match format.name.as_str() {
-                            "json" => ValueType::Json,
+                            "json" => ValueType::Dynamic,
                             _ => ValueType::Unknown,
                         },
                     };
@@ -459,7 +459,7 @@ fn expr_type(expr: &Expr) -> ValueType {
         Expr::Atom(_) => ValueType::Atom,
         Expr::Sigil(sigil) => match sigil.name.name.as_str() {
             "sql" => ValueType::String,
-            "json" => ValueType::Json,
+            "json" => ValueType::Dynamic,
             "hex" => ValueType::Bytes,
             _ => ValueType::Unknown,
         },

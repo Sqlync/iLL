@@ -80,7 +80,7 @@ impl Command for Query {
         const FIELDS: &[OutcomeField] = &[
             OutcomeField {
                 name: "rows",
-                ty: ValueType::Json,
+                ty: ValueType::Dynamic,
             },
             OutcomeField {
                 name: "count",
