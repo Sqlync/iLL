@@ -1,5 +1,5 @@
 use super::modes::READY;
-use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, OutcomeField, ValueType};
 
 // All HTTP verbs share the same shape: positional URL, optional headers/body/timeout.
 
@@ -40,6 +40,23 @@ macro_rules! http_verb {
                         required: false,
                     },
                 ]
+            }
+            fn ok_fields(&self) -> &'static [OutcomeField] {
+                const FIELDS: &[OutcomeField] = &[
+                    OutcomeField {
+                        name: "status_code",
+                        ty: ValueType::Number,
+                    },
+                    OutcomeField {
+                        name: "body",
+                        ty: ValueType::Unknown,
+                    },
+                    OutcomeField {
+                        name: "headers",
+                        ty: ValueType::Unknown,
+                    },
+                ];
+                FIELDS
             }
         }
 

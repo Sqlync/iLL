@@ -65,6 +65,30 @@ pub struct KeywordArgDef {
     pub required: bool,
 }
 
+// ── Outcome field descriptors ──────────────────────────────────────────────────
+//
+// Declare the named fields available on `ok.*` and `error.*` after a command.
+// Commands that don't override `ok_fields` / `error_fields` return empty slices
+// for ok and `DEFAULT_ERROR_FIELDS` for error.
+
+pub struct OutcomeField {
+    pub name: &'static str,
+    pub ty: ValueType,
+}
+
+/// Fields present on `error.*` for every command that can fail with a
+/// structured error. Commands may override `error_fields` to add more.
+pub static DEFAULT_ERROR_FIELDS: &[OutcomeField] = &[
+    OutcomeField {
+        name: "code",
+        ty: ValueType::Number,
+    },
+    OutcomeField {
+        name: "message",
+        ty: ValueType::String,
+    },
+];
+
 // ── Commands ───────────────────────────────────────────────────────────────────
 
 pub trait Command: Send + Sync + 'static {
@@ -86,15 +110,15 @@ pub trait Command: Send + Sync + 'static {
         &[]
     }
 
-    /// Shape of `ok.*` after a successful execution. `Unknown` is fine for
-    /// commands where the result type hasn't been designed yet.
-    fn result_type(&self) -> ValueType {
-        ValueType::Unknown
+    /// Named fields available on `ok.*` after successful execution.
+    fn ok_fields(&self) -> &'static [OutcomeField] {
+        &[]
     }
 
-    /// Shape of `error.*` after a failed execution.
-    fn error_type(&self) -> ValueType {
-        ValueType::Unknown
+    /// Named fields available on `error.*` after a failed execution.
+    /// Defaults to `DEFAULT_ERROR_FIELDS` (`code`, `message`).
+    fn error_fields(&self) -> &'static [OutcomeField] {
+        DEFAULT_ERROR_FIELDS
     }
 
     // Phase 5 will add something like:

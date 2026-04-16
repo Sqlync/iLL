@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use crate::actor_type::{ActorType, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{ActorType, KeywordArgDef, Mode, OutcomeField, ValueType};
 use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
@@ -137,8 +137,9 @@ impl<'r> Validator<'r> {
             return;
         }
 
-        // Track the last command's ok result shape for `let x = ok.*` resolution.
-        let mut last_ok: ValueType = ValueType::Unknown;
+        // Fields available on `ok.*` / `error.*` for the last command.
+        let mut last_ok_fields: &'static [OutcomeField] = &[];
+        let mut last_error_fields: &'static [OutcomeField] = &[];
 
         // Outcome state for the current command window. Reset on each command;
         // updated as ok/error asserts are encountered. Used to determine whether
@@ -164,15 +165,21 @@ impl<'r> Validator<'r> {
                     }
                     outcome = CommandOutcome::ImpliedOk;
 
-                    let (ok, _, transition) = self.check_command(&block.actor.name, cmd);
-                    last_ok = ok;
+                    let (ok_fields, error_fields, transition) =
+                        self.check_command(&block.actor.name, cmd);
+                    last_ok_fields = ok_fields;
+                    last_error_fields = error_fields;
                     pending_transition = transition;
                 }
                 Statement::Let(let_stmt) => {
                     let ty = match &let_stmt.value {
-                        ast::LetValue::Expr(expr) => {
-                            self.expr_type_in_actor(&block.actor.name, expr, last_ok)
-                        }
+                        ast::LetValue::Expr(expr) => self.expr_type_in_actor(
+                            &block.actor.name,
+                            expr,
+                            last_ok_fields,
+                            last_error_fields,
+                            outcome,
+                        ),
                         ast::LetValue::Parse { format, .. } => match format.name.as_str() {
                             "json" => ValueType::Json,
                             _ => ValueType::Unknown,
@@ -224,16 +231,20 @@ impl<'r> Validator<'r> {
 
     // ── Commands ──────────────────────────────────────────────────────────────
 
-    /// Returns `(ok_type, error_type, pending_transition)` for the command.
+    /// Returns `(ok_fields, error_fields, pending_transition)` for the command.
     /// The transition is returned rather than applied so the caller can defer
     /// it until the command's outcome is known from following asserts.
     fn check_command(
         &mut self,
         actor_name: &str,
         cmd: &ast::Command,
-    ) -> (ValueType, ValueType, Option<&'static dyn Mode>) {
+    ) -> (
+        &'static [OutcomeField],
+        &'static [OutcomeField],
+        Option<&'static dyn Mode>,
+    ) {
         let Some(state) = self.actors.get(actor_name) else {
-            return (ValueType::Unknown, ValueType::Unknown, None);
+            return (&[], &[], None);
         };
         let type_def = state.type_def;
         let current_mode = state.mode;
@@ -248,7 +259,7 @@ impl<'r> Validator<'r> {
                     type_def.name()
                 ),
             ));
-            return (ValueType::Unknown, ValueType::Unknown, None);
+            return (&[], &[], None);
         };
 
         // Mode check
@@ -268,7 +279,7 @@ impl<'r> Validator<'r> {
                     expected.join(", "),
                 ),
             ));
-            return (ValueType::Unknown, ValueType::Unknown, None);
+            return (&[], &[], None);
         }
 
         // Required positional args (presence only for now).
@@ -294,7 +305,11 @@ impl<'r> Validator<'r> {
             Some(&cmd.name.name),
         );
 
-        (cmd_def.result_type(), cmd_def.error_type(), cmd_def.transitions_to())
+        (
+            cmd_def.ok_fields(),
+            cmd_def.error_fields(),
+            cmd_def.transitions_to(),
+        )
     }
 
     fn check_keyword_args_against(
@@ -346,18 +361,45 @@ impl<'r> Validator<'r> {
 
     // ── Expression typing (narrow) ────────────────────────────────────────────
 
-    fn expr_type_in_actor(&self, actor_name: &str, expr: &Expr, last_ok: ValueType) -> ValueType {
+    fn expr_type_in_actor(
+        &self,
+        actor_name: &str,
+        expr: &Expr,
+        last_ok_fields: &'static [OutcomeField],
+        last_error_fields: &'static [OutcomeField],
+        outcome: CommandOutcome,
+    ) -> ValueType {
         match expr {
-            Expr::Ident(ident) => {
-                // `ok` is a keyword-ish binding set by the last command.
-                if ident.name == "ok" {
-                    return last_ok;
+            Expr::MemberAccess {
+                object, property, ..
+            } => {
+                // Resolve `ok.<field>` and `error.<field>` against the last
+                // command's declared outcome fields.
+                if let Expr::Ident(ident) = object.as_ref() {
+                    let fields = match ident.name.as_str() {
+                        "ok" => last_ok_fields,
+                        "error" => last_error_fields,
+                        _ => &[],
+                    };
+                    if !fields.is_empty() {
+                        return fields
+                            .iter()
+                            .find(|f| f.name == property.name)
+                            .map(|f| f.ty)
+                            .unwrap_or(ValueType::Unknown);
+                    }
                 }
+                ValueType::Unknown
+            }
+            Expr::Ident(ident) => {
                 if let Some(state) = self.actors.get(actor_name) {
                     if let Some(ty) = state.vars.get(&ident.name) {
                         return *ty;
                     }
                 }
+                // `ok` / `error` bare — resolve to Unknown; field access is
+                // the expected usage.
+                let _ = outcome; // reserved for future bare-ok diagnostics
                 ValueType::Unknown
             }
             _ => expr_type(expr),

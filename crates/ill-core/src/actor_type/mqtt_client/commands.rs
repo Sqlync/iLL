@@ -1,5 +1,5 @@
 use super::modes::{CONNECTED, DISCONNECTED};
-use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{ArgDef, Command, KeywordArgDef, Mode, OutcomeField, ValueType};
 
 pub struct Connect;
 impl Command for Connect {
@@ -185,6 +185,20 @@ impl Command for Receive {
             ty: ValueType::Number,
             required: false,
         }]
+    }
+
+    fn ok_fields(&self) -> &'static [OutcomeField] {
+        const FIELDS: &[OutcomeField] = &[
+            OutcomeField {
+                name: "topic",
+                ty: ValueType::String,
+            },
+            OutcomeField {
+                name: "payload",
+                ty: ValueType::Unknown,
+            },
+        ];
+        FIELDS
     }
 }
 
