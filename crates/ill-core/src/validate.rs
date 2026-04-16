@@ -173,13 +173,32 @@ impl<'r> Validator<'r> {
                 }
                 Statement::Let(let_stmt) => {
                     let ty = match &let_stmt.value {
-                        ast::LetValue::Expr(expr) => self.expr_type_in_actor(
-                            &block.actor.name,
-                            expr,
-                            last_ok_fields,
-                            last_error_fields,
-                            outcome,
-                        ),
+                        ast::LetValue::Expr(expr) => {
+                            // A `let` binding that references `ok.*` or `error.*`
+                            // implies the command's outcome, same as an assert.
+                            if expr_starts_with_ident(expr, "ok") {
+                                outcome = advance_outcome(
+                                    outcome,
+                                    true,
+                                    let_stmt.span,
+                                    &mut self.diagnostics,
+                                );
+                            } else if expr_starts_with_ident(expr, "error") {
+                                outcome = advance_outcome(
+                                    outcome,
+                                    false,
+                                    let_stmt.span,
+                                    &mut self.diagnostics,
+                                );
+                            }
+                            self.expr_type_in_actor(
+                                &block.actor.name,
+                                expr,
+                                last_ok_fields,
+                                last_error_fields,
+                                outcome,
+                            )
+                        }
                         ast::LetValue::Parse { format, .. } => match format.name.as_str() {
                             "json" => ValueType::Json,
                             _ => ValueType::Unknown,
@@ -198,20 +217,8 @@ impl<'r> Validator<'r> {
                     let asserts_error = expr_starts_with_ident(&a.left, "error");
 
                     if asserts_ok || asserts_error {
-                        outcome = match (outcome, asserts_ok) {
-                            (CommandOutcome::ImpliedOk, true) => CommandOutcome::ExplicitOk,
-                            (CommandOutcome::ImpliedOk, false) => CommandOutcome::ExplicitError,
-                            (CommandOutcome::ExplicitOk, false)
-                            | (CommandOutcome::ExplicitError, true) => {
-                                self.diagnostics.push(Diagnostic::error(
-                                    a.span,
-                                    DiagnosticCode::ConflictingOutcomeAsserts,
-                                    "cannot assert both `ok` and `error` for the same command",
-                                ));
-                                outcome // leave unchanged after conflict
-                            }
-                            (o, _) => o, // already conflicted or same direction
-                        };
+                        outcome =
+                            advance_outcome(outcome, asserts_ok, a.span, &mut self.diagnostics);
                     }
                     // TODO: check both sides type-check and are comparable.
                     // Deferred — low-value for Phase 4, high-noise potential.
@@ -404,6 +411,33 @@ impl<'r> Validator<'r> {
             }
             _ => expr_type(expr),
         }
+    }
+}
+
+/// Advance the `CommandOutcome` state when an `ok.*` or `error.*` reference is
+/// encountered — whether in an `assert` or a `let` binding.
+///
+/// `is_ok` is true for `ok.*`, false for `error.*`. Emits
+/// `ConflictingOutcomeAsserts` if both sides are referenced for the same
+/// command.
+fn advance_outcome(
+    current: CommandOutcome,
+    is_ok: bool,
+    span: ast::Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CommandOutcome {
+    match (current, is_ok) {
+        (CommandOutcome::ImpliedOk, true) => CommandOutcome::ExplicitOk,
+        (CommandOutcome::ImpliedOk, false) => CommandOutcome::ExplicitError,
+        (CommandOutcome::ExplicitOk, false) | (CommandOutcome::ExplicitError, true) => {
+            diagnostics.push(Diagnostic::error(
+                span,
+                DiagnosticCode::ConflictingOutcomeAsserts,
+                "cannot mix `ok` and `error` references for the same command",
+            ));
+            current
+        }
+        (o, _) => o,
     }
 }
 
@@ -623,5 +657,64 @@ as alice:
             codes(&diags(src)),
             vec![DiagnosticCode::ConflictingOutcomeAsserts]
         );
+    }
+
+    /// A `let` binding that references `ok.*` implicitly commits to the ok
+    /// branch, same as `assert ok.*`. A following `assert error.*` must be
+    /// flagged as conflicting.
+    #[test]
+    fn let_ok_then_assert_error_is_flagged() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  let x = ok.rows
+  assert error.code == 1
+";
+        assert_eq!(
+            codes(&diags(src)),
+            vec![DiagnosticCode::ConflictingOutcomeAsserts]
+        );
+    }
+
+    /// A `let` binding on `ok.*` advances the mode (it implies success), so a
+    /// second connect must be invalid.
+    #[test]
+    fn let_ok_advances_mode() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  let x = ok.rows
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert_eq!(
+            codes(&diags(src)),
+            vec![DiagnosticCode::CommandNotValidInMode]
+        );
+    }
+
+    /// A `let` binding on `error.*` keeps the mode (it implies failure), so
+    /// a second connect must remain valid.
+    #[test]
+    fn let_error_does_not_advance_mode() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  let e = error.code
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert!(diags(src).is_empty(), "expected no diagnostics");
     }
 }
