@@ -8,17 +8,11 @@
 # use — nothing stops you, but side effects aren't reasoned about.
 
 actor server = exec,
-  command: "./bin/my-api"
+  command: "python3 -m http.server ${self.port}"
   vars:
     @access read
     port: 8080
-actor client = http_client
 
 as server:
-  run,
-    env:
-      PORT: "${self.port}"
-
-as client:
-  get "http://localhost:${server.port}/health"
-  assert ok.status == 200
+  run
+  stop
