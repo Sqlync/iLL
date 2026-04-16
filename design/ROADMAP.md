@@ -19,17 +19,18 @@ Write `grammar.js`. Get it parsing all the examples. Test with `tree-sitter pars
 ## Phase 3: AST
 Define Rust data structures for the language and lower the tree-sitter CST into them. Commands are generic (name + args) — actor-specific knowledge lives in the validation pass, not the AST.
 
-- [ ] Core AST types (actors, statements, expressions)
-- [ ] Tree-sitter → AST lowering pass
-- [ ] All examples lower to valid ASTs
+- [x] Core AST types (actors, statements, expressions)
+- [x] Tree-sitter → AST lowering pass
+- [x] All examples lower to valid ASTs
 
 ## Phase 4: Validation Pass
 Mode checking, name resolution (does this actor exist?), type checking (is this expression valid here?). Actor-specific command and mode definitions live here, making actor types pluggable.
 
-- [ ] Name resolution (actor declarations → as block references)
-- [ ] Per-actor command validation (valid commands, required args, argument types)
-- [ ] Per-actor mode tracking (e.g. must connect before query)
-- [ ] Expression type checking
+- [x] Name resolution (actor declarations → as block references)
+- [x] Per-actor command validation (valid commands, required args, argument types)
+- [x] Per-actor mode tracking (e.g. must connect before query)
+- [x] Expression type checking
+- [ ] `ill check` command
 
 ## Phase 5: Interpreter / Runtime
 Actually execute the validated AST. Start postgres, run queries, check assertions.
@@ -45,3 +46,7 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 - [ ] Diagnostics from validation pass
 - [ ] Completions (keywords, actor names, mode-aware commands)
 - [ ] Hover information
+
+## Phase 7: Cleanup
+
+- [ ] remove all reference to phases and any other roadmap details

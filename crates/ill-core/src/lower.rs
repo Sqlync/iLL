@@ -912,21 +912,8 @@ actor args = args_actor,
     /// the whole corpus in one shot.
     #[test]
     fn all_examples_lower_cleanly() {
-        fn visit(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for entry in std::fs::read_dir(dir).unwrap().flatten() {
-                let p = entry.path();
-                if p.is_dir() {
-                    visit(&p, out);
-                } else if p.extension().and_then(|s| s.to_str()) == Some("ill") {
-                    out.push(p);
-                }
-            }
-        }
-
         let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let mut paths = Vec::new();
-        visit(&examples_dir, &mut paths);
-        paths.sort();
+        let paths = crate::test_util::collect_ill_files(&examples_dir);
         assert!(
             !paths.is_empty(),
             "found no examples under {}",

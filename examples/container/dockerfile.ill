@@ -6,7 +6,7 @@
 # see examples/container/languages/ for starter Dockerfiles for python, node, and rust
 
 actor app = container,
-  file: "languages/python.Dockerfile"
+  dockerfile: "languages/python.Dockerfile"
   vars:
     @access read
     port: 8080
