@@ -45,3 +45,7 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 - [ ] Diagnostics from validation pass
 - [ ] Completions (keywords, actor names, mode-aware commands)
 - [ ] Hover information
+
+## Phase 7: Cleanup
+
+- [ ] remove all reference to phases and any other roadmap details

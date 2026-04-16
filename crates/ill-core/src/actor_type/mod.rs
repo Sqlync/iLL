@@ -111,12 +111,22 @@ pub trait Command: Send + Sync + 'static {
     }
 
     /// Named fields available on `ok.*` after successful execution.
+    ///
+    /// These are validated statically against `ok.*` references in `let`
+    /// bindings and `assert` statements. Phase 5 will introduce a runtime
+    /// result type for each command — that type must expose the same fields
+    /// declared here. There is currently no automated check that the two stay
+    /// in sync; when Phase 5 result types are defined, revisit whether to
+    /// derive these from the runtime struct or add a registry-level assertion.
     fn ok_fields(&self) -> &'static [OutcomeField] {
         &[]
     }
 
     /// Named fields available on `error.*` after a failed execution.
     /// Defaults to `DEFAULT_ERROR_FIELDS` (`code`, `message`).
+    ///
+    /// Same Phase 5 caveat as `ok_fields`: the runtime error type must match
+    /// what is declared here.
     fn error_fields(&self) -> &'static [OutcomeField] {
         DEFAULT_ERROR_FIELDS
     }
