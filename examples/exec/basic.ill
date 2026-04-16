@@ -1,4 +1,4 @@
-# basic exec example
+# (very) basic exec example
 #
 # demonstrates starting a long-running process on the host.
 #
@@ -7,10 +7,7 @@
 # use — nothing stops you, but side effects aren't contained.
 
 actor server = exec,
-  command: "python3 -m http.server ${self.port}"
-  vars:
-    @access read
-    port: 8080
+  command: "python3 -m http.server 8080"
 
 as server:
   run
