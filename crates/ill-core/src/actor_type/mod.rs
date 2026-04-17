@@ -1,11 +1,14 @@
 // Actor type substrate for iLL.
 //
 // Actor types are pluggable via trait objects. Phase 4 (validation) consumes
-// `&'static dyn ActorType`; Phase 5 will add runtime execution as a sibling
-// trait. Keeping everything behind `dyn` means nothing outside an actor's own
-// module needs to match on actor identity.
+// `&'static dyn ActorType`; Phase 5 adds runtime execution via `spawn` on
+// `ActorType` and `execute` on `Command`. Keeping everything behind `dyn`
+// means nothing outside an actor's own module needs to match on actor
+// identity.
 
 use std::any::Any;
+
+use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome};
 
 pub mod args_actor;
 pub mod container;
@@ -134,9 +137,14 @@ pub trait Command: Send + Sync + 'static {
         DEFAULT_ERROR_FIELDS
     }
 
-    // Phase 5 will add something like:
-    //   fn execute(&self, instance: &mut dyn ActorInstance, args: &Args)
-    //     -> Result<Value, RuntimeError>;
+    /// Run the command against a live actor instance. Default returns
+    /// `NotImplemented` — Phase 6 actors opt in by overriding this.
+    fn execute(&self, _instance: &mut dyn ActorInstance, _args: &CommandArgs) -> RunOutcome {
+        RunOutcome::NotImplemented {
+            actor: _instance.type_name(),
+            cmd: self.name(),
+        }
+    }
 }
 
 // ── Actor types ────────────────────────────────────────────────────────────────
@@ -164,6 +172,30 @@ pub trait ActorType: Send + Sync + 'static {
     fn mode(&self, name: &str) -> Option<&'static dyn Mode> {
         self.modes().iter().copied().find(|m| m.name() == name)
     }
+
+    /// Spawn a runtime instance from declaration-site kwargs. Default returns
+    /// `ActorNotImplemented` — Phase 6 actors opt in by overriding this.
+    fn spawn(&self, _args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        Err(RuntimeError::ActorNotImplemented(self.name()))
+    }
+}
+
+// ── Actor instances (runtime) ─────────────────────────────────────────────────
+//
+// A live actor. Created by `ActorType::spawn`, dispatched against by
+// `Command::execute`, torn down by `teardown`. `teardown` is idempotent — the
+// harness's RAII guard calls it on every path (success, failure, panic).
+
+pub trait ActorInstance: Send {
+    fn type_name(&self) -> &'static str;
+
+    /// Cast to `Any` so `Command::execute` impls can downcast to the concrete
+    /// instance type. Concrete impls return `self`.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Release any resources held by the instance. Called in reverse-spawn
+    /// order. Idempotent — safe to call more than once.
+    fn teardown(&mut self) -> TeardownOutcome;
 }
 
 #[cfg(test)]

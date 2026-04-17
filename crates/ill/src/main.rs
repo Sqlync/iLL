@@ -4,6 +4,7 @@ use std::process;
 use clap::{Parser, Subcommand};
 
 use ill_core::diagnostic::Severity;
+use ill_core::runtime::report::{StatementReport, TestReport};
 
 const ILL_EXTENSION: &str = "ill";
 
@@ -91,30 +92,13 @@ fn run_test(paths: &[PathBuf]) {
             }
         };
 
-        match ill_core::lower::lower(&src) {
-            Ok(ast) => {
-                let diags = ill_core::validate::validate(&ast);
-                let errors: Vec<_> = diags
-                    .iter()
-                    .filter(|d| d.severity == Severity::Error)
-                    .collect();
-                if errors.is_empty() {
-                    passed += 1;
-                } else {
-                    eprintln!("FAIL {}", path.display());
-                    for d in &errors {
-                        eprintln!("  {d}");
-                    }
-                    failed += 1;
-                }
-            }
-            Err(errors) => {
-                eprintln!("FAIL {}", path.display());
-                for e in &errors {
-                    eprintln!("  {e}");
-                }
-                failed += 1;
-            }
+        let report = ill_core::runtime::harness::run_test_file(path, &src);
+        if report.passed {
+            println!("PASS {}", path.display());
+            passed += 1;
+        } else {
+            print_failed_report(&report);
+            failed += 1;
         }
     }
 
@@ -122,6 +106,101 @@ fn run_test(paths: &[PathBuf]) {
 
     if failed > 0 {
         process::exit(1);
+    }
+}
+
+fn print_failed_report(report: &TestReport) {
+    eprintln!("FAIL {}", report.path.display());
+    for s in &report.statements {
+        match s {
+            StatementReport::ParseFailure(msgs) => {
+                for m in msgs {
+                    eprintln!("  parse error: {m}");
+                }
+            }
+            StatementReport::ValidationFailure(diags) => {
+                for d in diags {
+                    eprintln!("  {d}");
+                }
+            }
+            StatementReport::SpawnFailure {
+                actor,
+                message,
+                span,
+            } => {
+                eprintln!(
+                    "  [{}..{}] spawn failed for `{actor}`: {message}",
+                    span.start, span.end
+                );
+            }
+            StatementReport::CommandFailure {
+                actor,
+                command,
+                span,
+                error_fields,
+                expect,
+            } => {
+                eprintln!(
+                    "  [{}..{}] {actor}: `{command}` failed",
+                    span.start, span.end
+                );
+                for (k, v) in error_fields {
+                    eprintln!("    error.{k} = {v}");
+                }
+                if let Some(e) = expect {
+                    eprintln!("    @expect {e:?}");
+                }
+            }
+            StatementReport::CommandNotImplemented {
+                actor,
+                command,
+                span,
+            } => {
+                eprintln!(
+                    "  [{}..{}] {actor}: `{command}` has no runtime implementation",
+                    span.start, span.end
+                );
+            }
+            StatementReport::AssertFailure {
+                actor,
+                span,
+                left,
+                right,
+                op,
+                expect,
+            } => {
+                eprintln!("  [{}..{}] {actor}: assertion failed", span.start, span.end);
+                match (op, right) {
+                    (Some(op), Some(right)) => {
+                        eprintln!("    left:  {left}");
+                        eprintln!("    op:    {op}");
+                        eprintln!("    right: {right}");
+                    }
+                    _ => {
+                        eprintln!("    value: {left} (not truthy)");
+                    }
+                }
+                if let Some(e) = expect {
+                    eprintln!("    @expect {e:?}");
+                }
+            }
+            StatementReport::EvalError {
+                actor,
+                span,
+                message,
+            } => {
+                eprintln!("  [{}..{}] {actor}: {message}", span.start, span.end);
+            }
+        }
+    }
+    for t in &report.teardown {
+        if !t.outcome.ok {
+            eprintln!(
+                "  teardown {}: {}",
+                t.actor,
+                t.outcome.message.as_deref().unwrap_or("failed")
+            );
+        }
     }
 }
 

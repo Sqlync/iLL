@@ -1,0 +1,317 @@
+// Runtime half of the `exec` actor. Spawns the configured command as a child
+// process and streams stdout/stderr into in-memory buffers. `run` is
+// spawn-only — the process stays alive until teardown sends SIGTERM / SIGKILL.
+
+use std::any::Any;
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command as StdCommand, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use crate::actor_type::ActorInstance;
+use crate::runtime::{RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
+
+/// Time between SIGTERM and SIGKILL during teardown.
+const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
+
+pub struct ExecInstance {
+    command: String,
+    source_dir: PathBuf,
+    child: Option<Child>,
+    stdout: Arc<Mutex<Vec<u8>>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
+    stdout_thread: Option<JoinHandle<()>>,
+    stderr_thread: Option<JoinHandle<()>>,
+}
+
+impl ExecInstance {
+    pub fn spawn(args: &SpawnArgs) -> Result<Self, RuntimeError> {
+        let command = match args.kw("command") {
+            Some(Value::String(s)) => s.clone(),
+            Some(other) => {
+                return Err(RuntimeError::TypeMismatch {
+                    expected: "string",
+                    got: other.type_name(),
+                    context: "exec `command`".into(),
+                });
+            }
+            None => return Err(RuntimeError::MissingKwarg { name: "command" }),
+        };
+
+        Ok(Self {
+            command,
+            source_dir: args.source_dir.clone(),
+            child: None,
+            stdout: Arc::new(Mutex::new(Vec::new())),
+            stderr: Arc::new(Mutex::new(Vec::new())),
+            stdout_thread: None,
+            stderr_thread: None,
+        })
+    }
+
+    /// Start the process. Non-blocking: returns as soon as the child is
+    /// spawned. `ok.pid` carries the process id for later assertions.
+    pub fn run(&mut self, env: Option<&Value>) -> RunOutcome {
+        if self.child.is_some() {
+            let mut fields = BTreeMap::new();
+            fields.insert("code".into(), Value::Number(1));
+            fields.insert(
+                "message".into(),
+                Value::String("exec process already running".into()),
+            );
+            return RunOutcome::Error(fields);
+        }
+
+        let parts = match shlex::split(&self.command) {
+            Some(p) if !p.is_empty() => p,
+            _ => {
+                let mut fields = BTreeMap::new();
+                fields.insert("code".into(), Value::Number(1));
+                fields.insert(
+                    "message".into(),
+                    Value::String(format!("invalid command: {:?}", self.command)),
+                );
+                return RunOutcome::Error(fields);
+            }
+        };
+
+        let (program, rest) = parts.split_first().unwrap();
+        let resolved = resolve_program(program, &self.source_dir);
+
+        let mut cmd = StdCommand::new(&resolved);
+        cmd.args(rest)
+            .current_dir(&self.source_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(env_val) = env {
+            if let Err(e) = apply_env(&mut cmd, env_val) {
+                let mut fields = BTreeMap::new();
+                fields.insert("code".into(), Value::Number(1));
+                fields.insert("message".into(), Value::String(e));
+                return RunOutcome::Error(fields);
+            }
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut fields = BTreeMap::new();
+                fields.insert("code".into(), Value::Number(1));
+                fields.insert(
+                    "message".into(),
+                    Value::String(format!("spawn failed: {e}")),
+                );
+                return RunOutcome::Error(fields);
+            }
+        };
+
+        let pid = child.id();
+
+        if let Some(mut out) = child.stdout.take() {
+            let buf = Arc::clone(&self.stdout);
+            self.stdout_thread = Some(std::thread::spawn(move || {
+                drain(&mut out, &buf);
+            }));
+        }
+        if let Some(mut err) = child.stderr.take() {
+            let buf = Arc::clone(&self.stderr);
+            self.stderr_thread = Some(std::thread::spawn(move || {
+                drain(&mut err, &buf);
+            }));
+        }
+
+        self.child = Some(child);
+
+        let mut ok = BTreeMap::new();
+        ok.insert("pid".into(), Value::Number(pid as i64));
+        RunOutcome::Ok(ok)
+    }
+}
+
+impl ActorInstance for ExecInstance {
+    fn type_name(&self) -> &'static str {
+        "exec"
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn teardown(&mut self) -> TeardownOutcome {
+        let Some(mut child) = self.child.take() else {
+            return TeardownOutcome::ok();
+        };
+
+        // Try a graceful stop first.
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGTERM);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = child.kill();
+        }
+
+        let deadline = Instant::now() + TEARDOWN_GRACE;
+        let mut outcome = TeardownOutcome::ok();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        if let Err(e) = child.kill() {
+                            outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
+                        }
+                        let _ = child.wait();
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(e) => {
+                    outcome = TeardownOutcome::failed(format!("wait failed: {e}"));
+                    break;
+                }
+            }
+        }
+
+        if let Some(t) = self.stdout_thread.take() {
+            let _ = t.join();
+        }
+        if let Some(t) = self.stderr_thread.take() {
+            let _ = t.join();
+        }
+
+        outcome
+    }
+}
+
+impl Drop for ExecInstance {
+    fn drop(&mut self) {
+        if self.child.is_some() {
+            let _ = self.teardown();
+        }
+    }
+}
+
+fn drain<R: Read>(src: &mut R, dst: &Arc<Mutex<Vec<u8>>>) {
+    let mut buf = [0u8; 4096];
+    loop {
+        match src.read(&mut buf) {
+            Ok(0) => return,
+            Ok(n) => {
+                if let Ok(mut g) = dst.lock() {
+                    g.extend_from_slice(&buf[..n]);
+                }
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+fn resolve_program(program: &str, source_dir: &Path) -> PathBuf {
+    let p = Path::new(program);
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    // Bare name (no separator) → PATH lookup by std::process::Command.
+    if !program.contains('/') && !program.contains('\\') {
+        return PathBuf::from(program);
+    }
+    // Relative path → resolve from the .ill file's directory.
+    source_dir.join(program)
+}
+
+fn apply_env(cmd: &mut StdCommand, env: &Value) -> Result<(), String> {
+    match env {
+        Value::Record(fields) => {
+            for (k, v) in fields {
+                let s = match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Atom(a) => a.clone(),
+                    other => {
+                        return Err(format!(
+                            "env value for `{k}` is {} (expected string-like)",
+                            other.type_name()
+                        ));
+                    }
+                };
+                cmd.env(k, s);
+            }
+            Ok(())
+        }
+        other => Err(format!("`env` must be a record, got {}", other.type_name())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_args(command: &str) -> SpawnArgs {
+        let mut kw = BTreeMap::new();
+        kw.insert("command".into(), Value::String(command.into()));
+        SpawnArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+        }
+    }
+
+    #[test]
+    fn missing_command_kwarg_errors() {
+        let args = SpawnArgs {
+            keyword: BTreeMap::new(),
+            source_dir: std::env::temp_dir(),
+        };
+        let err = match ExecInstance::spawn(&args) {
+            Ok(_) => panic!("expected error"),
+            Err(e) => e,
+        };
+        assert!(matches!(err, RuntimeError::MissingKwarg { .. }));
+    }
+
+    #[test]
+    fn run_spawns_and_populates_pid() {
+        // `sleep 60` stays alive long enough for teardown to exercise SIGTERM.
+        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
+        let outcome = inst.run(None);
+        match outcome {
+            RunOutcome::Ok(fields) => {
+                let pid = fields.get("pid").expect("pid field");
+                assert!(matches!(pid, Value::Number(n) if *n > 0));
+            }
+            RunOutcome::Error(f) => panic!("expected Ok, got Error: {f:?}"),
+            RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
+        }
+        let td = inst.teardown();
+        assert!(td.ok, "teardown failed: {:?}", td.message);
+    }
+
+    #[test]
+    fn double_run_returns_error() {
+        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
+        let _ = inst.run(None);
+        let second = inst.run(None);
+        assert!(matches!(second, RunOutcome::Error(_)));
+        let _ = inst.teardown();
+    }
+
+    #[test]
+    fn ok_fields_match_command_declaration() {
+        use crate::actor_type::exec::commands::RUN;
+        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
+        let outcome = inst.run(None);
+        let RunOutcome::Ok(fields) = outcome else {
+            panic!("expected ok");
+        };
+        let declared: Vec<&'static str> = RUN.ok_fields().iter().map(|f| f.name).collect();
+        let returned: Vec<&str> = fields.keys().map(|s| s.as_str()).collect();
+        assert_eq!(declared, returned);
+        let _ = inst.teardown();
+    }
+}
