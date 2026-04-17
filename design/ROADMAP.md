@@ -65,3 +65,4 @@ Cross-cutting concerns that apply to multiple actors or require broader design. 
 
 - [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)
   - also, TBD: how to handle expected actor death
+- [ ] Process supervision / orphan prevention — current exec teardown is Drop + catch_unwind only; kill -9 of the runner or an abort leaks child processes. Needed once actors hold real resources (DB servers, HTTP listeners, anything with a port or file lock). Likely shape: `setpgid` in `pre_exec` on all unix, `PR_SET_PDEATHSIG` on Linux, re-exec-self supervisor subcommand on macOS watching the parent via pipe-EOF or kqueue.
