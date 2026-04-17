@@ -2,7 +2,7 @@
 //
 // Intended for long-running things like servers, daemons, and brokers. The
 // `command` is supplied at declaration; `run` starts it and transitions the
-// actor from `idle` to `running`.
+// actor from `stopped` to `running`.
 
 pub mod commands;
 pub mod modes;
@@ -17,11 +17,11 @@ impl ActorType for Exec {
     }
 
     fn initial_mode(&self) -> &'static dyn Mode {
-        modes::IDLE
+        modes::STOPPED
     }
 
     fn modes(&self) -> &'static [&'static dyn Mode] {
-        static MODES: &[&dyn Mode] = &[modes::IDLE, modes::RUNNING];
+        static MODES: &[&dyn Mode] = &[modes::STOPPED, modes::RUNNING];
         MODES
     }
 

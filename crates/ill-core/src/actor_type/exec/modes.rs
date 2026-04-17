@@ -1,11 +1,11 @@
 use crate::actor_type::Mode;
 
-pub struct Idle;
+pub struct Stopped;
 pub struct Running;
 
-impl Mode for Idle {
+impl Mode for Stopped {
     fn name(&self) -> &'static str {
-        "idle"
+        "stopped"
     }
     fn actor_type(&self) -> &'static str {
         "exec"
@@ -21,5 +21,5 @@ impl Mode for Running {
     }
 }
 
-pub static IDLE: &dyn Mode = &Idle;
+pub static STOPPED: &dyn Mode = &Stopped;
 pub static RUNNING: &dyn Mode = &Running;

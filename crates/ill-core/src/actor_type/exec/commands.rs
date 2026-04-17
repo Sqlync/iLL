@@ -1,4 +1,4 @@
-use super::modes::{IDLE, RUNNING};
+use super::modes::{RUNNING, STOPPED};
 use crate::actor_type::{Command, KeywordArgDef, Mode, ValueType};
 
 pub struct Run;
@@ -9,7 +9,7 @@ impl Command for Run {
     }
 
     fn valid_in_modes(&self) -> &'static [&'static dyn Mode] {
-        static VALID: &[&dyn Mode] = &[IDLE];
+        static VALID: &[&dyn Mode] = &[STOPPED];
         VALID
     }
 
