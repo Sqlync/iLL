@@ -1,14 +1,12 @@
 // Runtime half of the `exec` actor. Spawns the configured command as a child
-// process and streams stdout/stderr into in-memory buffers. `run` is
-// spawn-only — the process stays alive until teardown sends SIGTERM / SIGKILL.
+// process. `run` is spawn-only — the process stays alive until teardown sends
+// SIGTERM / SIGKILL. Stdout/stderr inherit from the runner; a bounded-buffer
+// capture mechanism is tracked in ROADMAP (Deferred).
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command as StdCommand, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::process::{Child, Command as StdCommand};
 use std::time::{Duration, Instant};
 
 use crate::actor_type::ActorInstance;
@@ -21,10 +19,6 @@ pub struct ExecInstance {
     command: String,
     source_dir: PathBuf,
     child: Option<Child>,
-    stdout: Arc<Mutex<Vec<u8>>>,
-    stderr: Arc<Mutex<Vec<u8>>>,
-    stdout_thread: Option<JoinHandle<()>>,
-    stderr_thread: Option<JoinHandle<()>>,
 }
 
 impl ExecInstance {
@@ -45,10 +39,6 @@ impl ExecInstance {
             command,
             source_dir: args.source_dir.clone(),
             child: None,
-            stdout: Arc::new(Mutex::new(Vec::new())),
-            stderr: Arc::new(Mutex::new(Vec::new())),
-            stdout_thread: None,
-            stderr_thread: None,
         })
     }
 
@@ -68,10 +58,7 @@ impl ExecInstance {
         let resolved = resolve_program(program, &self.source_dir);
 
         let mut cmd = StdCommand::new(&resolved);
-        cmd.args(rest)
-            .current_dir(&self.source_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.args(rest).current_dir(&self.source_dir);
 
         if let Some(env_val) = env {
             if let Err(e) = apply_env(&mut cmd, env_val) {
@@ -79,26 +66,12 @@ impl ExecInstance {
             }
         }
 
-        let mut child = match cmd.spawn() {
+        let child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return RunOutcome::error(1, format!("spawn failed: {e}")),
         };
 
         let pid = child.id();
-
-        if let Some(mut out) = child.stdout.take() {
-            let buf = Arc::clone(&self.stdout);
-            self.stdout_thread = Some(std::thread::spawn(move || {
-                drain(&mut out, &buf);
-            }));
-        }
-        if let Some(mut err) = child.stderr.take() {
-            let buf = Arc::clone(&self.stderr);
-            self.stderr_thread = Some(std::thread::spawn(move || {
-                drain(&mut err, &buf);
-            }));
-        }
-
         self.child = Some(child);
 
         let mut ok = BTreeMap::new();
@@ -135,13 +108,9 @@ impl ActorInstance for ExecInstance {
         let mut outcome = TeardownOutcome::ok();
         loop {
             match child.try_wait() {
-                Ok(Some(_)) => break,
+                Ok(Some(_)) => return outcome,
                 Ok(None) => {
                     if Instant::now() >= deadline {
-                        if let Err(e) = child.kill() {
-                            outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
-                        }
-                        let _ = child.wait();
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(25));
@@ -153,13 +122,13 @@ impl ActorInstance for ExecInstance {
             }
         }
 
-        if let Some(t) = self.stdout_thread.take() {
-            let _ = t.join();
+        if let Err(e) = child.kill() {
+            // ESRCH means the child exited between try_wait and kill — not an error.
+            if e.kind() != std::io::ErrorKind::NotFound {
+                outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
+            }
         }
-        if let Some(t) = self.stderr_thread.take() {
-            let _ = t.join();
-        }
-
+        let _ = child.wait();
         outcome
     }
 }
@@ -168,21 +137,6 @@ impl Drop for ExecInstance {
     fn drop(&mut self) {
         if self.child.is_some() {
             let _ = self.teardown();
-        }
-    }
-}
-
-fn drain<R: Read>(src: &mut R, dst: &Arc<Mutex<Vec<u8>>>) {
-    let mut buf = [0u8; 4096];
-    loop {
-        match src.read(&mut buf) {
-            Ok(0) => return,
-            Ok(n) => {
-                if let Ok(mut g) = dst.lock() {
-                    g.extend_from_slice(&buf[..n]);
-                }
-            }
-            Err(_) => return,
         }
     }
 }
