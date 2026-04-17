@@ -122,11 +122,10 @@ impl ActorInstance for ExecInstance {
             }
         }
 
+        // `Child::kill` is Ok if the child has already exited, so any Err here
+        // is a genuine failure (e.g. permission denied).
         if let Err(e) = child.kill() {
-            // ESRCH means the child exited between try_wait and kill — not an error.
-            if e.kind() != std::io::ErrorKind::NotFound {
-                outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
-            }
+            outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
         }
         let _ = child.wait();
         outcome
@@ -228,6 +227,36 @@ mod tests {
         let second = inst.run(None);
         assert!(matches!(second, RunOutcome::Error(_)));
         let _ = inst.teardown();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn teardown_sigkills_sigterm_ignoring_child() {
+        // bash traps TERM and sleeps; teardown must escalate to SIGKILL after
+        // TEARDOWN_GRACE (2s) and still report ok.
+        let mut inst =
+            ExecInstance::spawn(&spawn_args("bash -c 'trap \"\" TERM; sleep 60'")).unwrap();
+        let outcome = inst.run(None);
+        assert!(matches!(outcome, RunOutcome::Ok(_)));
+
+        // Give bash time to install the trap before we send SIGTERM, otherwise
+        // the signal races with bash's startup and the test measures the wrong
+        // path.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let start = std::time::Instant::now();
+        let td = inst.teardown();
+        let elapsed = start.elapsed();
+
+        assert!(td.ok, "teardown failed: {:?}", td.message);
+        assert!(
+            elapsed >= TEARDOWN_GRACE,
+            "teardown returned before grace period: {elapsed:?}"
+        );
+        assert!(
+            elapsed < TEARDOWN_GRACE + Duration::from_secs(2),
+            "teardown took too long: {elapsed:?}"
+        );
     }
 
     #[test]
