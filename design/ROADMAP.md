@@ -64,4 +64,4 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
 
 - [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)
-  - also, how to handle expected actor death?
+  - also, TBD: how to handle expected actor death

@@ -29,11 +29,7 @@ as db:
 
 # step 2: start the REST API server
 as api:
-  run,
-    port: 8080
-    env:
-      POSTGRES_PORT: 12345
-      POSTGRES_PASSWORD: "root"
+  run
 
 # step 3: alice signs up via REST api
 as alice:
