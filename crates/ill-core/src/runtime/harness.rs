@@ -143,12 +143,23 @@ fn run_as_block(
     let actor_name = &block.actor.name;
 
     // Resolve the actor type for command lookup. Validation has already
-    // ensured the instance exists.
+    // ensured both exist — defend anyway so a harness/validator drift surfaces
+    // as a recorded failure instead of a silently-passing test.
     let Some(type_name) = guard.get(actor_name).map(|i| i.type_name()) else {
-        return false;
+        statements.push(StatementReport::EvalError {
+            actor: actor_name.clone(),
+            span: block.span,
+            message: format!("actor `{actor_name}` has no live instance"),
+        });
+        return true;
     };
     let Some(actor_type) = registry.get(type_name) else {
-        return false;
+        statements.push(StatementReport::EvalError {
+            actor: actor_name.clone(),
+            span: block.span,
+            message: format!("unknown actor type `{type_name}` in registry"),
+        });
+        return true;
     };
 
     let mut scope = Scope::new();
@@ -228,7 +239,6 @@ fn run_as_block(
                             command: c.to_string(),
                             span: cmd.span,
                         });
-                        let _ = actor_name;
                         return true;
                     }
                 }
