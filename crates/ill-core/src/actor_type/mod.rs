@@ -9,6 +9,7 @@ use std::any::Any;
 
 pub mod args_actor;
 pub mod container;
+pub mod exec;
 pub mod http_client;
 pub mod mqtt_client;
 pub mod pg_client;
