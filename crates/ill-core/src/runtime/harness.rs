@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 
 use crate::actor_type::ActorInstance;
 use crate::ast::{
-    ActorDeclaration, AsBlock, Command as CommandAst, Expr, KeywordArg, KeywordValue, Let,
-    LetValue, SourceFile, Statement, TopLevel,
+    ActorDeclaration, AsBlock, Command as CommandAst, KeywordArg, KeywordValue, Let, LetValue,
+    SourceFile, Statement, TopLevel,
 };
 use crate::diagnostic::Severity;
 use crate::registry::Registry;
+use crate::validate::expr_starts_with_ident;
 
 use super::assert::eval_assert;
 use super::eval::{eval, Scope};
@@ -165,10 +166,9 @@ fn run_as_block(
     let mut scope = Scope::new();
     // `ok` and `error` are bound per-command; start unset.
 
-    for stmt in &block.body {
+    for (idx, stmt) in block.body.iter().enumerate() {
         match stmt {
             Statement::Command(cmd) => {
-                // Clear per-command bindings.
                 scope.unbind("ok");
                 scope.unbind("error");
 
@@ -203,24 +203,17 @@ fn run_as_block(
                     return true;
                 };
 
-                let outcome = cmd_def.execute(instance.as_mut(), &args);
+                let outcome = cmd_def.execute(instance, &args);
                 match outcome {
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
                     }
                     RunOutcome::Error(fields) => {
-                        // An unannounced error is a test failure. If the
-                        // following statements include `assert error.*`, the
-                        // later assert flip would normally handle this — but
-                        // at the runtime level we treat any Error outcome as
-                        // a potential failure and only clear it if the next
-                        // statement is an `error.*` reference. Simpler:
-                        // record failure eagerly, bind `error` so asserts can
-                        // still inspect it.
+                        // An Error is a failure unless the following statements
+                        // reference `error.*`, which commits the command to the
+                        // error branch (matching validator semantics).
                         let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
-                        // Peek: if the block continues with an `error.*` ref,
-                        // this was expected. Otherwise, record failure now.
-                        let was_expected = block_has_error_ref_after(block, stmt);
+                        let was_expected = block_has_error_ref_after(block, idx);
                         scope.bind("error", Value::Record(fields.clone()));
                         if !was_expected {
                             statements.push(StatementReport::CommandFailure {
@@ -273,7 +266,7 @@ fn run_as_block(
                         span: a.span,
                         left: r.left,
                         right: r.right,
-                        op: r.op.map(|o| format!("{o:?}")),
+                        op: r.op,
                         expect,
                     });
                     return true;
@@ -350,31 +343,24 @@ fn eval_keyword_args(
     Ok(out)
 }
 
-/// Check whether any statement after `current` in the block references
+/// Check whether any statement after index `after` in the block references
 /// `error.*` — matching the validator's rule that an `error.*` reference
 /// commits the preceding command to the error branch.
-fn block_has_error_ref_after(block: &AsBlock, current: &Statement) -> bool {
-    let mut seen = false;
-    for stmt in &block.body {
-        if !seen {
-            if std::ptr::eq(stmt, current) {
-                seen = true;
-            }
-            continue;
-        }
+fn block_has_error_ref_after(block: &AsBlock, after: usize) -> bool {
+    for stmt in block.body.iter().skip(after + 1) {
         // Stop at the next command — that opens a new command window.
         if matches!(stmt, Statement::Command(_)) {
             return false;
         }
         match stmt {
             Statement::Assert(a) => {
-                if expr_starts_with(&a.left, "error") {
+                if expr_starts_with_ident(&a.left, "error") {
                     return true;
                 }
             }
             Statement::Let(l) => {
                 if let LetValue::Expr(e) = &l.value {
-                    if expr_starts_with(e, "error") {
+                    if expr_starts_with_ident(e, "error") {
                         return true;
                     }
                 }
@@ -383,15 +369,6 @@ fn block_has_error_ref_after(block: &AsBlock, current: &Statement) -> bool {
         }
     }
     false
-}
-
-fn expr_starts_with(expr: &Expr, name: &str) -> bool {
-    match expr {
-        Expr::Ident(i) => i.name == name,
-        Expr::MemberAccess { object, .. } => expr_starts_with(object, name),
-        Expr::Index { object, .. } => expr_starts_with(object, name),
-        _ => false,
-    }
 }
 
 // ── Teardown ──────────────────────────────────────────────────────────────────
@@ -423,11 +400,13 @@ impl TeardownGuard {
             .map(|(_, i)| i.as_ref())
     }
 
-    fn get_mut(&mut self, name: &str) -> Option<&mut Box<dyn ActorInstance>> {
-        self.entries
-            .iter_mut()
-            .find(|(n, _)| n == name)
-            .map(|(_, i)| i)
+    fn get_mut(&mut self, name: &str) -> Option<&mut dyn ActorInstance> {
+        for (n, inst) in self.entries.iter_mut() {
+            if n == name {
+                return Some(&mut **inst);
+            }
+        }
+        None
     }
 
     fn teardown_all(&mut self) -> Vec<TeardownReport> {

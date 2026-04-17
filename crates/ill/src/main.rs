@@ -170,15 +170,12 @@ fn print_failed_report(report: &TestReport) {
                 expect,
             } => {
                 eprintln!("  [{}..{}] {actor}: assertion failed", span.start, span.end);
-                match (op, right) {
-                    (Some(op), Some(right)) => {
-                        eprintln!("    left:  {left}");
-                        eprintln!("    op:    {op}");
-                        eprintln!("    right: {right}");
-                    }
-                    _ => {
-                        eprintln!("    value: {left} (not truthy)");
-                    }
+                if let (Some(op), Some(right)) = (op, right) {
+                    eprintln!("    left:  {left}");
+                    eprintln!("    op:    {op:?}");
+                    eprintln!("    right: {right}");
+                } else {
+                    eprintln!("    value: {left} (not truthy)");
                 }
                 if let Some(e) = expect {
                     eprintln!("    @expect {e:?}");

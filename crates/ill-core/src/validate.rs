@@ -441,7 +441,10 @@ fn advance_outcome(
     }
 }
 
-fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
+/// True if `expr` is `name`, `name.foo`, `name[…]`, or any nested chain rooted
+/// at an ident named `name`. Used by both validation and runtime to detect
+/// `ok.*` / `error.*` references.
+pub(crate) fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
     match expr {
         Expr::Ident(ident) => ident.name == name,
         Expr::MemberAccess { object, .. } => expr_starts_with_ident(object, name),

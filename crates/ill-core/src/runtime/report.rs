@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::ast::Span;
+use crate::ast::{ComparisonOp, Span};
 use crate::diagnostic::Diagnostic;
 
 use super::Value;
@@ -12,17 +12,6 @@ pub struct TestReport {
     pub passed: bool,
     pub statements: Vec<StatementReport>,
     pub teardown: Vec<TeardownReport>,
-}
-
-impl TestReport {
-    pub fn pass(path: PathBuf) -> Self {
-        Self {
-            path,
-            passed: true,
-            statements: Vec::new(),
-            teardown: Vec::new(),
-        }
-    }
 }
 
 /// Per-statement result. Only failures carry detail — success is implicit in
@@ -52,7 +41,7 @@ pub enum StatementReport {
         span: Span,
         left: Value,
         right: Option<Value>,
-        op: Option<String>,
+        op: Option<ComparisonOp>,
         expect: Option<String>,
     },
     EvalError {

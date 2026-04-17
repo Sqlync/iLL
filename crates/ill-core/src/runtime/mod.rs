@@ -55,6 +55,17 @@ pub enum RunOutcome {
     },
 }
 
+impl RunOutcome {
+    /// Build a simple `Error` outcome with `code` and `message` fields — the
+    /// common shape for actor-internal failures.
+    pub fn error(code: i64, message: impl Into<String>) -> Self {
+        let mut fields = BTreeMap::new();
+        fields.insert("code".into(), Value::Number(code));
+        fields.insert("message".into(), Value::String(message.into()));
+        RunOutcome::Error(fields)
+    }
+}
+
 /// The result of tearing down an actor instance. Teardown errors are reported
 /// but don't overwrite a test failure that already happened earlier.
 pub struct TeardownOutcome {

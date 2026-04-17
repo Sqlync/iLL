@@ -56,26 +56,12 @@ impl ExecInstance {
     /// spawned. `ok.pid` carries the process id for later assertions.
     pub fn run(&mut self, env: Option<&Value>) -> RunOutcome {
         if self.child.is_some() {
-            let mut fields = BTreeMap::new();
-            fields.insert("code".into(), Value::Number(1));
-            fields.insert(
-                "message".into(),
-                Value::String("exec process already running".into()),
-            );
-            return RunOutcome::Error(fields);
+            return RunOutcome::error(1, "exec process already running");
         }
 
         let parts = match shlex::split(&self.command) {
             Some(p) if !p.is_empty() => p,
-            _ => {
-                let mut fields = BTreeMap::new();
-                fields.insert("code".into(), Value::Number(1));
-                fields.insert(
-                    "message".into(),
-                    Value::String(format!("invalid command: {:?}", self.command)),
-                );
-                return RunOutcome::Error(fields);
-            }
+            _ => return RunOutcome::error(1, format!("invalid command: {:?}", self.command)),
         };
 
         let (program, rest) = parts.split_first().unwrap();
@@ -89,24 +75,13 @@ impl ExecInstance {
 
         if let Some(env_val) = env {
             if let Err(e) = apply_env(&mut cmd, env_val) {
-                let mut fields = BTreeMap::new();
-                fields.insert("code".into(), Value::Number(1));
-                fields.insert("message".into(), Value::String(e));
-                return RunOutcome::Error(fields);
+                return RunOutcome::error(1, e);
             }
         }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => {
-                let mut fields = BTreeMap::new();
-                fields.insert("code".into(), Value::Number(1));
-                fields.insert(
-                    "message".into(),
-                    Value::String(format!("spawn failed: {e}")),
-                );
-                return RunOutcome::Error(fields);
-            }
+            Err(e) => return RunOutcome::error(1, format!("spawn failed: {e}")),
         };
 
         let pid = child.id();
