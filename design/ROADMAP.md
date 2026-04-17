@@ -40,23 +40,23 @@ End-to-end vertical slice with the simplest actor: run a command on the host, ca
 - [ ] Test harness reporting (pass/fail, exit codes) proven against exec tests
 - [ ] Teardown semantics, including failure paths
 
-## Actors
-Additional actor types are tracked here rather than as sequential phases — they can be built in any order once Phase 5 lands, and can happen in parallel with later phases. Container should come next since postgres and MQTT will typically run inside containers. Extract shared pieces from Phase 5 as patterns repeat; refactor when the second actor forces it, not before.
+## Phase 6: Implement the rest of the Actors
+In any order
 
+- [ ] Built-in actors (assert, env, etc.)
 - [ ] Container (image/dockerfile, run, lifecycle, shell)
 - [ ] Postgres (start/stop, client, queries)
 - [ ] MQTT (broker, client, pub/sub)
 - [ ] REST (HTTP client)
-- [ ] Built-in actors (assert, env, etc.)
 
-## Phase 6: LSP
+## Phase 7: LSP
 Wire tree-sitter + validation into the language server for diagnostics, completions, hover.
 
 - [ ] Diagnostics from validation pass
 - [ ] Completions (keywords, actor names, mode-aware commands)
 - [ ] Hover information
 
-## Phase 7: Cleanup
+## Phase 8: Cleanup
 
 - [ ] remove all reference to phases and any other roadmap details
 
@@ -64,3 +64,4 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
 
 - [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)
+  - also, how to handle expected actor death?

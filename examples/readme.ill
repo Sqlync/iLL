@@ -1,14 +1,14 @@
 # let's test a signup flow against an imaginary REST API with the following steps: 
 # 1. start a postgres database server 
-# 2. start the REST API server
+# 2. start a Django REST API server
 # 3. user alice signs up via a REST API 
 # 4. user bob connects to the postgres server and queries via SQL to verify alice's record exists
 
 # step 0: define the "actors" and their member variables up front
 actor db = container,
   image: "postgres:18"
-actor api = container,
-  dockerfile: "./my-api.Dockerfile"
+actor api = exec,
+  command: "python3 manage.py runserver 8080"
 actor alice = http_client,
   # actors can have member variables
   vars:
