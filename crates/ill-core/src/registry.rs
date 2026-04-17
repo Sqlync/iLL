@@ -11,7 +11,9 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::actor_type::{args_actor, container, http_client, mqtt_client, pg_client, ActorType};
+use crate::actor_type::{
+    args_actor, container, exec, http_client, mqtt_client, pg_client, ActorType,
+};
 
 pub struct Registry {
     actors: HashMap<&'static str, &'static dyn ActorType>,
@@ -29,6 +31,7 @@ impl Registry {
         };
         r.register(pg_client::PG_CLIENT);
         r.register(container::CONTAINER);
+        r.register(exec::EXEC);
         r.register(http_client::HTTP_CLIENT);
         r.register(mqtt_client::MQTT_CLIENT);
         r.register(args_actor::ARGS_ACTOR);

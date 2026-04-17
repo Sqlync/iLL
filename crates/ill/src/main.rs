@@ -182,7 +182,11 @@ fn run_check(paths: &[PathBuf]) {
             parts.push(format!("{error_count} {word}"));
         }
         if warning_count > 0 {
-            let word = if warning_count == 1 { "warning" } else { "warnings" };
+            let word = if warning_count == 1 {
+                "warning"
+            } else {
+                "warnings"
+            };
             parts.push(format!("{warning_count} {word}"));
         }
         if info_count > 0 {
