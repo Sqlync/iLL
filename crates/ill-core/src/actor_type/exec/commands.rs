@@ -1,7 +1,5 @@
 use super::modes::{RUNNING, STOPPED};
-use super::runtime::ExecInstance;
-use crate::actor_type::{ActorInstance, Command, KeywordArgDef, Mode, OutcomeField, ValueType};
-use crate::runtime::{CommandArgs, RunOutcome};
+use crate::actor_type::{Command, KeywordArgDef, Mode, OutcomeField, ValueType};
 
 pub struct Run;
 
@@ -33,16 +31,6 @@ impl Command for Run {
             name: "pid",
             ty: ValueType::Number,
         }]
-    }
-
-    fn execute(&self, instance: &mut dyn ActorInstance, args: &CommandArgs) -> RunOutcome {
-        let Some(exec) = instance.as_any_mut().downcast_mut::<ExecInstance>() else {
-            return RunOutcome::NotImplemented {
-                actor: instance.type_name(),
-                cmd: "run",
-            };
-        };
-        exec.run(args.kw("env"))
     }
 }
 

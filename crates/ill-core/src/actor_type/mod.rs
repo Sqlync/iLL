@@ -1,10 +1,15 @@
 // Actor type substrate for iLL.
 //
 // Actor types are pluggable via trait objects. Phase 4 (validation) consumes
-// `&'static dyn ActorType`; Phase 5 adds runtime execution via `spawn` on
-// `ActorType` and `execute` on `Command`. Keeping everything behind `dyn`
-// means nothing outside an actor's own module needs to match on actor
-// identity.
+// `&'static dyn ActorType`; Phase 5 adds runtime execution via `spawn` and
+// `execute` on `ActorType`. Keeping everything behind `dyn` means nothing
+// outside an actor's own module needs to match on actor identity.
+//
+// `Command` carries only static metadata (name, modes, arg/outcome shapes)
+// consumed by the validator. Dispatch lives on `ActorType::execute`: the
+// actor downcasts its instance once and routes by command name. This keeps
+// the type-erasure boundary at the actor edge instead of re-laundering the
+// concrete instance type through every command impl.
 
 use std::any::Any;
 
@@ -136,15 +141,6 @@ pub trait Command: Send + Sync + 'static {
     fn error_fields(&self) -> &'static [OutcomeField] {
         DEFAULT_ERROR_FIELDS
     }
-
-    /// Run the command against a live actor instance. Default returns
-    /// `NotImplemented` — Phase 6 actors opt in by overriding this.
-    fn execute(&self, _instance: &mut dyn ActorInstance, _args: &CommandArgs) -> RunOutcome {
-        RunOutcome::NotImplemented {
-            actor: _instance.type_name(),
-            cmd: self.name(),
-        }
-    }
 }
 
 // ── Actor types ────────────────────────────────────────────────────────────────
@@ -177,6 +173,23 @@ pub trait ActorType: Send + Sync + 'static {
     /// `ActorNotImplemented` — Phase 6 actors opt in by overriding this.
     fn spawn(&self, _args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         Err(RuntimeError::ActorNotImplemented(self.name()))
+    }
+
+    /// Run a validated command against a live instance of this actor. `cmd`
+    /// is the command's static name (as returned by `Command::name`), so the
+    /// default `NotImplemented` arm can pass it through without allocation.
+    /// The instance is guaranteed by the harness to have been spawned by this
+    /// same actor type, so the impl may downcast with `.expect(...)`.
+    fn execute(
+        &self,
+        cmd: &'static str,
+        _instance: &mut dyn ActorInstance,
+        _args: &CommandArgs,
+    ) -> RunOutcome {
+        RunOutcome::NotImplemented {
+            actor: self.name(),
+            cmd,
+        }
     }
 }
 
