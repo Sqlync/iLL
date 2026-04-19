@@ -63,16 +63,16 @@ pub fn run_test_file(path: &Path, src: &str) -> TestReport {
 fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     let registry = Registry::global();
     let mut statements: Vec<StatementReport> = Vec::new();
-    let mut guard = TeardownGuard::new();
+    let mut actors = InstantiatedActors::new();
 
     // Walk top-level items in source order: construct actors as we encounter
     // them, run `as` blocks against whatever's already live. Any failure stops
-    // the walk — teardown still runs via `guard` for everything constructed
+    // the walk — teardown still runs via `actors` for everything constructed
     // so far.
     for item in &source.items {
         match item {
             TopLevel::ActorDeclaration(decl) => match construct_actor(registry, decl, source_dir) {
-                Ok(inst) => guard.push(decl.name.name.clone(), inst),
+                Ok(inst) => actors.push(decl.name.name.clone(), inst),
                 Err(msg) => {
                     statements.push(StatementReport::ConstructFailure {
                         actor: decl.name.name.clone(),
@@ -83,7 +83,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
                 }
             },
             TopLevel::AsBlock(block) => {
-                if run_as_block(block, &mut guard, &mut statements) {
+                if run_as_block(block, &mut actors, &mut statements) {
                     break;
                 }
             }
@@ -91,7 +91,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     }
 
     let passed = statements.is_empty();
-    let teardown = guard.teardown_all();
+    let teardown = actors.teardown_all();
     TestReport {
         path: path.to_path_buf(),
         passed,
@@ -123,7 +123,7 @@ fn construct_actor(
 /// should stop (the caller still runs teardown).
 fn run_as_block(
     block: &AsBlock,
-    guard: &mut TeardownGuard,
+    actors: &mut InstantiatedActors,
     statements: &mut Vec<StatementReport>,
 ) -> bool {
     let registry = Registry::global();
@@ -132,7 +132,7 @@ fn run_as_block(
     // Resolve the actor type for command lookup. Validation has already
     // ensured both exist — defend anyway so a harness/validator drift surfaces
     // as a recorded failure instead of a silently-passing test.
-    let Some(type_name) = guard.get(actor_name).map(|i| i.type_name()) else {
+    let Some(type_name) = actors.get(actor_name).map(|i| i.type_name()) else {
         statements.push(StatementReport::EvalError {
             actor: actor_name.clone(),
             span: block.span,
@@ -180,7 +180,7 @@ fn run_as_block(
                     return true;
                 };
 
-                let Some(instance) = guard.get_mut(actor_name) else {
+                let Some(instance) = actors.get_mut(actor_name) else {
                     statements.push(StatementReport::EvalError {
                         actor: actor_name.clone(),
                         span: cmd.span,
@@ -357,18 +357,18 @@ fn block_has_error_ref_after(block: &AsBlock, after: usize) -> bool {
     false
 }
 
-// ── Teardown ──────────────────────────────────────────────────────────────────
+// ── Live actor instances ─────────────────────────────────────────────────────
 //
 // Holds instances in construction order. `teardown_all` tears down in
 // reverse. `Drop` is the last-resort safety net for panics — in the normal
 // path `teardown_all` is called explicitly so results can be recorded.
 
-struct TeardownGuard {
+struct InstantiatedActors {
     /// (actor name, instance). Ordered by construction.
     entries: Vec<(String, Box<dyn ActorInstance>)>,
 }
 
-impl TeardownGuard {
+impl InstantiatedActors {
     fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -411,7 +411,7 @@ impl TeardownGuard {
     }
 }
 
-impl Drop for TeardownGuard {
+impl Drop for InstantiatedActors {
     fn drop(&mut self) {
         // If teardown_all already ran, entries is empty. This only fires
         // on panic.
