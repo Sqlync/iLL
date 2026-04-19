@@ -461,8 +461,8 @@ mod tests {
     }
 
     #[test]
-    fn exec_basic_spawn_and_teardown() {
-        // Uses `sleep 60` so the spawn has time to be observed and torn down.
+    fn exec_basic_construct_and_teardown() {
+        // Uses `sleep 60` so the process has time to be observed and torn down.
         let src = "\
 actor server = exec,
   command: \"sleep 60\"
