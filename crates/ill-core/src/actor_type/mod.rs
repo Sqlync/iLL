@@ -6,10 +6,9 @@
 // outside an actor's own module needs to match on actor identity.
 //
 // `Command` carries only static metadata (name, modes, arg/outcome shapes)
-// consumed by the validator. Dispatch lives on `ActorType::execute`: the
-// actor downcasts its instance once and routes by command name. This keeps
-// the type-erasure boundary at the actor edge instead of re-laundering the
-// concrete instance type through every command impl.
+// consumed by the validator. Dispatch lives on `ActorInstance::execute`:
+// `self` is already the concrete instance type inside the impl, so no
+// downcast is needed — the vtable does that work.
 
 use std::any::Any;
 
@@ -174,37 +173,27 @@ pub trait ActorType: Send + Sync + 'static {
     fn spawn(&self, _args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         Err(RuntimeError::ActorNotImplemented(self.name()))
     }
-
-    /// Run a validated command against a live instance of this actor. `cmd`
-    /// is the command's static name (as returned by `Command::name`), so the
-    /// default `NotImplemented` arm can pass it through without allocation.
-    /// The instance is guaranteed by the harness to have been spawned by this
-    /// same actor type, so the impl may downcast with `.expect(...)`.
-    fn execute(
-        &self,
-        cmd: &'static str,
-        _instance: &mut dyn ActorInstance,
-        _args: &CommandArgs,
-    ) -> RunOutcome {
-        RunOutcome::NotImplemented {
-            actor: self.name(),
-            cmd,
-        }
-    }
 }
 
 // ── Actor instances (runtime) ─────────────────────────────────────────────────
 //
 // A live actor. Created by `ActorType::spawn`, dispatched against by
-// `Command::execute`, torn down by `teardown`. `teardown` is idempotent — the
+// `execute`, torn down by `teardown`. `teardown` is idempotent — the
 // harness's RAII guard calls it on every path (success, failure, panic).
 
 pub trait ActorInstance: Send {
     fn type_name(&self) -> &'static str;
 
-    /// Cast to `Any` so `Command::execute` impls can downcast to the concrete
-    /// instance type. Concrete impls return `self`.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Run a validated command against this instance. `cmd` is the command's
+    /// static name (as returned by `Command::name`), so the default
+    /// `NotImplemented` arm can pass it through without allocation. Default
+    /// returns `NotImplemented` — Phase 6 actors opt in by overriding this.
+    fn execute(&mut self, cmd: &'static str, _args: &CommandArgs) -> RunOutcome {
+        RunOutcome::NotImplemented {
+            actor: self.type_name(),
+            cmd,
+        }
+    }
 
     /// Release any resources held by the instance. Called in reverse-spawn
     /// order. Idempotent — safe to call more than once.

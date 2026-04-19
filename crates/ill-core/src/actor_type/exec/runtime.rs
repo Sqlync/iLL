@@ -3,14 +3,13 @@
 // SIGTERM / SIGKILL. Stdout/stderr inherit from the runner; a bounded-buffer
 // capture mechanism is tracked in ROADMAP (Deferred).
 
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
 use std::time::{Duration, Instant};
 
 use crate::actor_type::ActorInstance;
-use crate::runtime::{RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
+use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
 
 /// Time between SIGTERM and SIGKILL during teardown.
 const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -85,8 +84,14 @@ impl ActorInstance for ExecInstance {
         "exec"
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
+    fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
+        match cmd {
+            "run" => self.run(args.kw("env")),
+            other => RunOutcome::NotImplemented {
+                actor: self.type_name(),
+                cmd: other,
+            },
+        }
     }
 
     fn teardown(&mut self) -> TeardownOutcome {

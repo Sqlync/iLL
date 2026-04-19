@@ -9,7 +9,7 @@ pub mod modes;
 pub mod runtime;
 
 use super::{ActorInstance, ActorType, Command, KeywordArgDef, Mode, ValueType};
-use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs};
+use crate::runtime::{RuntimeError, SpawnArgs};
 
 pub struct Exec;
 
@@ -43,25 +43,6 @@ impl ActorType for Exec {
     fn spawn(&self, args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         let inst = runtime::ExecInstance::spawn(args)?;
         Ok(Box::new(inst))
-    }
-
-    fn execute(
-        &self,
-        cmd: &'static str,
-        instance: &mut dyn ActorInstance,
-        args: &CommandArgs,
-    ) -> RunOutcome {
-        let exec = instance
-            .as_any_mut()
-            .downcast_mut::<runtime::ExecInstance>()
-            .expect("harness routes commands to matching actor instances");
-        match cmd {
-            "run" => exec.run(args.kw("env")),
-            other => RunOutcome::NotImplemented {
-                actor: self.name(),
-                cmd: other,
-            },
-        }
     }
 }
 

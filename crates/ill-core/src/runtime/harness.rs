@@ -203,7 +203,7 @@ fn run_as_block(
                     return true;
                 };
 
-                let outcome = actor_type.execute(cmd_def.name(), instance, &args);
+                let outcome = instance.execute(cmd_def.name(), &args);
                 match outcome {
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
