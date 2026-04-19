@@ -1,9 +1,11 @@
 // Runtime half of the `exec` actor. Modelled as a state machine over the
-// actor's modes: `Stopped` carries only declaration data, `Running` owns the
-// live child. Transitions happen inside `execute` / `teardown` — invalid
-// operations in the wrong mode are rejected by pattern match rather than an
-// implicit flag check. Stdout/stderr inherit from the runner; a bounded-buffer
-// capture mechanism is tracked in ROADMAP (Deferred).
+// actor's modes: `Stopped` carries no runtime data, `Running` owns the live
+// child. Shared actor identity (the target shell string, the source dir)
+// lives on `ExecInstance`; valid iLL commands per mode live as methods on
+// the mode variants. Invalid operations in the wrong mode are rejected by
+// pattern match rather than an implicit flag check. Stdout/stderr inherit
+// from the runner; a bounded-buffer capture mechanism is tracked in ROADMAP
+// (Deferred).
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
@@ -18,19 +20,20 @@ use crate::runtime::{
 /// Time between SIGTERM and SIGKILL during teardown.
 const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
 
-pub enum ExecInstance {
+pub struct ExecInstance {
+    target: String,
+    source_dir: PathBuf,
+    mode: ExecMode,
+}
+
+pub enum ExecMode {
     Stopped(Stopped),
     Running(Running),
 }
 
-pub struct Stopped {
-    command: String,
-    source_dir: PathBuf,
-}
+pub struct Stopped;
 
 pub struct Running {
-    command: String,
-    source_dir: PathBuf,
     child: KillOnDrop,
 }
 
@@ -73,7 +76,7 @@ impl Drop for KillOnDrop {
 
 impl ExecInstance {
     pub fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
-        let command = match args.kw("command") {
+        let target = match args.kw("command") {
             Some(Value::String(s)) => s.clone(),
             Some(other) => {
                 return Err(RuntimeError::TypeMismatch {
@@ -85,44 +88,54 @@ impl ExecInstance {
             None => return Err(RuntimeError::MissingKwarg { name: "command" }),
         };
 
-        Ok(Self::Stopped(Stopped {
-            command,
+        Ok(Self {
+            target,
             source_dir: args.source_dir.clone(),
-        }))
-    }
-
-    // Cheap `Stopped` used as a scratch value for `mem::replace` so we can
-    // move `self` by value into the per-mode handlers. Never observable —
-    // `execute` / `teardown` always write a real value back before returning.
-    fn placeholder() -> Self {
-        Self::Stopped(Stopped {
-            command: String::new(),
-            source_dir: PathBuf::new(),
+            mode: ExecMode::Stopped(Stopped),
         })
     }
 }
 
 impl Stopped {
-    /// Spawn the configured command. On success, transitions to `Running`;
+    fn execute(
+        self,
+        target: &str,
+        source_dir: &Path,
+        cmd: &'static str,
+        args: &CommandArgs,
+    ) -> (ExecMode, RunOutcome) {
+        match cmd {
+            "run" => self.run(target, source_dir, args.kw("env")),
+            other => (
+                ExecMode::Stopped(self),
+                RunOutcome::NotImplemented {
+                    actor: "exec",
+                    cmd: other,
+                },
+            ),
+        }
+    }
+
+    /// Spawn the configured target. On success, transitions to `Running`;
     /// on any pre-spawn or spawn error, stays in `Stopped`.
-    fn run(self, env: Option<&Value>) -> (ExecInstance, RunOutcome) {
-        let parts = match shlex::split(&self.command) {
+    fn run(self, target: &str, source_dir: &Path, env: Option<&Value>) -> (ExecMode, RunOutcome) {
+        let parts = match shlex::split(target) {
             Some(p) if !p.is_empty() => p,
             _ => {
-                let msg = format!("invalid command: {:?}", self.command);
-                return (ExecInstance::Stopped(self), RunOutcome::error(1, msg));
+                let msg = format!("invalid command: {target:?}");
+                return (ExecMode::Stopped(self), RunOutcome::error(1, msg));
             }
         };
 
         let (program, rest) = parts.split_first().unwrap();
-        let resolved = resolve_program(program, &self.source_dir);
+        let resolved = resolve_program(program, source_dir);
 
         let mut cmd = StdCommand::new(&resolved);
-        cmd.args(rest).current_dir(&self.source_dir);
+        cmd.args(rest).current_dir(source_dir);
 
         if let Some(env_val) = env {
             if let Err(e) = apply_env(&mut cmd, env_val) {
-                return (ExecInstance::Stopped(self), RunOutcome::error(1, e));
+                return (ExecMode::Stopped(self), RunOutcome::error(1, e));
             }
         }
 
@@ -130,29 +143,42 @@ impl Stopped {
             Ok(c) => c,
             Err(e) => {
                 let msg = format!("spawn failed: {e}");
-                return (ExecInstance::Stopped(self), RunOutcome::error(1, msg));
+                return (ExecMode::Stopped(self), RunOutcome::error(1, msg));
             }
         };
 
         let pid = child.id();
-        let running = Running {
-            command: self.command,
-            source_dir: self.source_dir,
-            child: KillOnDrop::new(child),
-        };
         (
-            ExecInstance::Running(running),
+            ExecMode::Running(Running {
+                child: KillOnDrop::new(child),
+            }),
             RunOutcome::Ok(RunOk { pid: pid as i64 }.into_record()),
         )
     }
 }
 
 impl Running {
+    fn execute(self, cmd: &'static str, _args: &CommandArgs) -> (ExecMode, RunOutcome) {
+        match cmd {
+            "run" => (
+                ExecMode::Running(self),
+                RunOutcome::error(1, "exec process already running"),
+            ),
+            other => (
+                ExecMode::Running(self),
+                RunOutcome::NotImplemented {
+                    actor: "exec",
+                    cmd: other,
+                },
+            ),
+        }
+    }
+
     /// SIGTERM, wait up to `TEARDOWN_GRACE`, then SIGKILL. Always transitions
     /// back to `Stopped` so a second teardown is a no-op. Disarms `KillOnDrop`
     /// at the tail — we've already reaped the child, so the drop-time fallback
     /// has nothing to do.
-    fn stop(mut self) -> (ExecInstance, TeardownOutcome) {
+    fn stop(mut self) -> (ExecMode, TeardownOutcome) {
         #[cfg(unix)]
         unsafe {
             libc::kill(self.child.as_mut().id() as i32, libc::SIGTERM);
@@ -168,7 +194,7 @@ impl Running {
             match self.child.as_mut().try_wait() {
                 Ok(Some(_)) => {
                     self.child.disarm();
-                    return (self.into_stopped(), outcome);
+                    return (ExecMode::Stopped(Stopped), outcome);
                 }
                 Ok(None) => {
                     if Instant::now() >= deadline {
@@ -190,14 +216,7 @@ impl Running {
         }
         let _ = self.child.as_mut().wait();
         self.child.disarm();
-        (self.into_stopped(), outcome)
-    }
-
-    fn into_stopped(self) -> ExecInstance {
-        ExecInstance::Stopped(Stopped {
-            command: self.command,
-            source_dir: self.source_dir,
-        })
+        (ExecMode::Stopped(Stopped), outcome)
     }
 }
 
@@ -207,26 +226,22 @@ impl ActorInstance for ExecInstance {
     }
 
     fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
-        let taken = std::mem::replace(self, Self::placeholder());
-        let (next, outcome) = match (taken, cmd) {
-            (Self::Stopped(s), "run") => s.run(args.kw("env")),
-            (Self::Running(r), "run") => (
-                Self::Running(r),
-                RunOutcome::error(1, "exec process already running"),
-            ),
-            (other, cmd) => (other, RunOutcome::NotImplemented { actor: "exec", cmd }),
+        let taken = std::mem::replace(&mut self.mode, ExecMode::Stopped(Stopped));
+        let (next, outcome) = match taken {
+            ExecMode::Stopped(s) => s.execute(&self.target, &self.source_dir, cmd, args),
+            ExecMode::Running(r) => r.execute(cmd, args),
         };
-        *self = next;
+        self.mode = next;
         outcome
     }
 
     fn teardown(&mut self) -> TeardownOutcome {
-        let taken = std::mem::replace(self, Self::placeholder());
+        let taken = std::mem::replace(&mut self.mode, ExecMode::Stopped(Stopped));
         let (next, outcome) = match taken {
-            Self::Stopped(s) => (Self::Stopped(s), TeardownOutcome::ok()),
-            Self::Running(r) => r.stop(),
+            ExecMode::Stopped(s) => (ExecMode::Stopped(s), TeardownOutcome::ok()),
+            ExecMode::Running(r) => r.stop(),
         };
-        *self = next;
+        self.mode = next;
         outcome
     }
 }
@@ -273,9 +288,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn construct_args(command: &str) -> ConstructArgs {
+    fn construct_args(target: &str) -> ConstructArgs {
         let mut kw = BTreeMap::new();
-        kw.insert("command".into(), Value::String(command.into()));
+        kw.insert("command".into(), Value::String(target.into()));
         ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
@@ -306,7 +321,7 @@ mod tests {
     fn run_spawns_and_populates_pid() {
         // `sleep 60` stays alive long enough for teardown to exercise SIGTERM.
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        assert!(matches!(inst, ExecInstance::Stopped(_)));
+        assert!(matches!(inst.mode, ExecMode::Stopped(_)));
 
         let outcome = inst.execute("run", &empty_args());
         match outcome {
@@ -317,11 +332,11 @@ mod tests {
             RunOutcome::Error(f) => panic!("expected Ok, got Error: {f:?}"),
             RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
         }
-        assert!(matches!(inst, ExecInstance::Running(_)));
+        assert!(matches!(inst.mode, ExecMode::Running(_)));
 
         let td = inst.teardown();
         assert!(td.ok, "teardown failed: {:?}", td.message);
-        assert!(matches!(inst, ExecInstance::Stopped(_)));
+        assert!(matches!(inst.mode, ExecMode::Stopped(_)));
     }
 
     #[test]
