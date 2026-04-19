@@ -83,7 +83,8 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
                 }
             },
             TopLevel::AsBlock(block) => {
-                if run_as_block(block, &mut actors, &mut statements) {
+                if let Err(stmt) = run_as_block(block, &mut actors) {
+                    statements.push(stmt);
                     break;
                 }
             }
@@ -119,35 +120,30 @@ fn construct_actor(
     actor_type.construct(&args).map_err(|e| e.to_string())
 }
 
-/// Walk an `as` block. Returns true if a failure was recorded and the test
+/// Walk an `as` block. `Err` signals that a failure was recorded and the test
 /// should stop (the caller still runs teardown).
-fn run_as_block(
-    block: &AsBlock,
-    actors: &mut InstantiatedActors,
-    statements: &mut Vec<StatementReport>,
-) -> bool {
+fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), StatementReport> {
     let registry = Registry::global();
     let actor_name = &block.actor.name;
 
     // Resolve the actor type for command lookup. Validation has already
     // ensured both exist — defend anyway so a harness/validator drift surfaces
     // as a recorded failure instead of a silently-passing test.
-    let Some(type_name) = actors.get(actor_name).map(|i| i.type_name()) else {
-        statements.push(StatementReport::EvalError {
+    let type_name = actors
+        .get(actor_name)
+        .map(|i| i.type_name())
+        .ok_or_else(|| StatementReport::EvalError {
             actor: actor_name.clone(),
             span: block.span,
             message: format!("actor `{actor_name}` has no live instance"),
-        });
-        return true;
-    };
-    let Some(actor_type) = registry.get(type_name) else {
-        statements.push(StatementReport::EvalError {
+        })?;
+    let actor_type = registry
+        .get(type_name)
+        .ok_or_else(|| StatementReport::EvalError {
             actor: actor_name.clone(),
             span: block.span,
             message: format!("unknown actor type `{type_name}` in registry"),
-        });
-        return true;
-    };
+        })?;
 
     let mut scope = Scope::new();
     // `ok` and `error` are bound per-command; start unset.
@@ -158,39 +154,32 @@ fn run_as_block(
                 scope.unbind("ok");
                 scope.unbind("error");
 
-                let args = match eval_command_args(cmd, &scope) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        statements.push(StatementReport::EvalError {
-                            actor: actor_name.clone(),
-                            span: cmd.span,
-                            message: e.to_string(),
-                        });
-                        return true;
-                    }
-                };
+                let args =
+                    eval_command_args(cmd, &scope).map_err(|e| StatementReport::EvalError {
+                        actor: actor_name.clone(),
+                        span: cmd.span,
+                        message: e.to_string(),
+                    })?;
 
-                let Some(cmd_def) = actor_type.command(&cmd.name.name) else {
-                    // Validator should have caught this; be defensive.
-                    statements.push(StatementReport::EvalError {
+                // Validator should have caught an unknown command; be defensive.
+                let cmd_def = actor_type.command(&cmd.name.name).ok_or_else(|| {
+                    StatementReport::EvalError {
                         actor: actor_name.clone(),
                         span: cmd.span,
                         message: format!("unknown command `{}`", cmd.name.name),
-                    });
-                    return true;
-                };
+                    }
+                })?;
 
-                let Some(instance) = actors.get_mut(actor_name) else {
-                    statements.push(StatementReport::EvalError {
-                        actor: actor_name.clone(),
-                        span: cmd.span,
-                        message: format!("actor `{actor_name}` has no live instance"),
-                    });
-                    return true;
-                };
+                let instance =
+                    actors
+                        .get_mut(actor_name)
+                        .ok_or_else(|| StatementReport::EvalError {
+                            actor: actor_name.clone(),
+                            span: cmd.span,
+                            message: format!("actor `{actor_name}` has no live instance"),
+                        })?;
 
-                let outcome = instance.execute(cmd_def.name(), &args);
-                match outcome {
+                match instance.execute(cmd_def.name(), &args) {
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
                     }
@@ -198,78 +187,66 @@ fn run_as_block(
                         // An Error is a failure unless the following statements
                         // reference `error.*`, which commits the command to the
                         // error branch (matching validator semantics).
-                        let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
                         let was_expected = block_has_error_ref_after(block, idx);
                         scope.bind("error", Value::Record(fields.clone()));
                         if !was_expected {
-                            statements.push(StatementReport::CommandFailure {
+                            let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
+                            return Err(StatementReport::CommandFailure {
                                 actor: actor_name.clone(),
                                 command: cmd.name.name.clone(),
                                 span: cmd.span,
                                 error_fields: fields,
                                 expect,
                             });
-                            return true;
                         }
                     }
                     RunOutcome::NotImplemented { actor, cmd: c } => {
-                        statements.push(StatementReport::CommandNotImplemented {
+                        return Err(StatementReport::CommandNotImplemented {
                             actor: actor.to_string(),
                             command: c.to_string(),
                             span: cmd.span,
                         });
-                        return true;
                     }
                 }
             }
-            Statement::Let(let_stmt) => match run_let(let_stmt, &mut scope) {
-                Ok(()) => {}
-                Err(e) => {
-                    statements.push(StatementReport::EvalError {
-                        actor: actor_name.clone(),
-                        span: let_stmt.span,
-                        message: e.to_string(),
-                    });
-                    return true;
-                }
-            },
+            Statement::Let(let_stmt) => {
+                run_let(let_stmt, &mut scope).map_err(|e| StatementReport::EvalError {
+                    actor: actor_name.clone(),
+                    span: let_stmt.span,
+                    message: e.to_string(),
+                })?;
+            }
             Statement::Assignment(_) => {
                 // Not supported in Phase 5. Validator accepts it; runtime
                 // flags it so a test can't silently no-op.
-                statements.push(StatementReport::EvalError {
+                return Err(StatementReport::EvalError {
                     actor: actor_name.clone(),
                     span: block.span,
                     message: "assignment statements are not yet supported in runtime".into(),
                 });
-                return true;
             }
-            Statement::Assert(a) => match eval_assert(a, &scope) {
-                Ok(r) if r.passed => {}
-                Ok(r) => {
+            Statement::Assert(a) => {
+                let result = eval_assert(a, &scope).map_err(|e| StatementReport::EvalError {
+                    actor: actor_name.clone(),
+                    span: a.span,
+                    message: e.to_string(),
+                })?;
+                if !result.passed {
                     let expect = a.annotation.as_ref().and_then(|an| an.value.clone());
-                    statements.push(StatementReport::AssertFailure {
+                    return Err(StatementReport::AssertFailure {
                         actor: actor_name.clone(),
                         span: a.span,
-                        left: r.left,
-                        right: r.right,
-                        op: r.op,
+                        left: result.left,
+                        right: result.right,
+                        op: result.op,
                         expect,
                     });
-                    return true;
                 }
-                Err(e) => {
-                    statements.push(StatementReport::EvalError {
-                        actor: actor_name.clone(),
-                        span: a.span,
-                        message: e.to_string(),
-                    });
-                    return true;
-                }
-            },
+            }
         }
     }
 
-    false
+    Ok(())
 }
 
 fn run_let(let_stmt: &Let, scope: &mut Scope) -> Result<(), RuntimeError> {
