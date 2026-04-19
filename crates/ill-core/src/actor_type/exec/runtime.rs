@@ -3,11 +3,11 @@
 // SIGTERM / SIGKILL. Stdout/stderr inherit from the runner; a bounded-buffer
 // capture mechanism is tracked in ROADMAP (Deferred).
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
 use std::time::{Duration, Instant};
 
+use super::commands::RunOk;
 use crate::actor_type::ActorInstance;
 use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
 
@@ -73,9 +73,7 @@ impl ExecInstance {
         let pid = child.id();
         self.child = Some(child);
 
-        let mut ok = BTreeMap::new();
-        ok.insert("pid".into(), Value::Number(pid as i64));
-        RunOutcome::Ok(ok)
+        RunOutcome::Ok(RunOk { pid: pid as i64 }.into_record())
     }
 }
 
@@ -185,6 +183,7 @@ fn apply_env(cmd: &mut StdCommand, env: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn spawn_args(command: &str) -> SpawnArgs {
         let mut kw = BTreeMap::new();
@@ -262,19 +261,5 @@ mod tests {
             elapsed < TEARDOWN_GRACE + Duration::from_secs(2),
             "teardown took too long: {elapsed:?}"
         );
-    }
-
-    #[test]
-    fn ok_fields_match_command_declaration() {
-        use crate::actor_type::exec::commands::RUN;
-        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
-        let outcome = inst.run(None);
-        let RunOutcome::Ok(fields) = outcome else {
-            panic!("expected ok");
-        };
-        let declared: Vec<&'static str> = RUN.ok_fields().iter().map(|f| f.name).collect();
-        let returned: Vec<&str> = fields.keys().map(|s| s.as_str()).collect();
-        assert_eq!(declared, returned);
-        let _ = inst.teardown();
     }
 }

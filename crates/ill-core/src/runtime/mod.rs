@@ -56,13 +56,15 @@ pub enum RunOutcome {
 }
 
 impl RunOutcome {
-    /// Build a simple `Error` outcome with `code` and `message` fields — the
-    /// common shape for actor-internal failures.
+    /// Build a simple `Error` outcome via the `StandardError` shape.
     pub fn error(code: i64, message: impl Into<String>) -> Self {
-        let mut fields = BTreeMap::new();
-        fields.insert("code".into(), Value::Number(code));
-        fields.insert("message".into(), Value::String(message.into()));
-        RunOutcome::Error(fields)
+        RunOutcome::Error(
+            crate::actor_type::StandardError {
+                code,
+                message: message.into(),
+            }
+            .into_record(),
+        )
     }
 }
 

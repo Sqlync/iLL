@@ -1,8 +1,8 @@
 // Actor type substrate for iLL.
 //
 // Actor types are pluggable via trait objects. Phase 4 (validation) consumes
-// `&'static dyn ActorType`; Phase 5 adds runtime execution via `spawn` and
-// `execute` on `ActorType`. Keeping everything behind `dyn` means nothing
+// `&'static dyn ActorType`; Phase 5 adds runtime execution via `ActorType::spawn`
+// and `ActorInstance::execute`. Keeping everything behind `dyn` means nothing
 // outside an actor's own module needs to match on actor identity.
 //
 // `Command` carries only static metadata (name, modes, arg/outcome shapes)
@@ -19,7 +19,10 @@ pub mod container;
 pub mod exec;
 pub mod http_client;
 pub mod mqtt_client;
+pub mod outcome;
 pub mod pg_client;
+
+pub use outcome::StandardError;
 
 // ── Modes ──────────────────────────────────────────────────────────────────────
 //
@@ -78,26 +81,13 @@ pub struct KeywordArgDef {
 // ── Outcome field descriptors ──────────────────────────────────────────────────
 //
 // Declare the named fields available on `ok.*` and `error.*` after a command.
-// Commands that don't override `ok_fields` / `error_fields` return empty slices
-// for ok and `DEFAULT_ERROR_FIELDS` for error.
+// Commands that don't override `ok_fields` / `error_fields` return an empty
+// slice for ok and `StandardError::FIELDS` for error.
 
 pub struct OutcomeField {
     pub name: &'static str,
     pub ty: ValueType,
 }
-
-/// Fields present on `error.*` for every command that can fail with a
-/// structured error. Commands may override `error_fields` to add more.
-pub static DEFAULT_ERROR_FIELDS: &[OutcomeField] = &[
-    OutcomeField {
-        name: "code",
-        ty: ValueType::Number,
-    },
-    OutcomeField {
-        name: "message",
-        ty: ValueType::String,
-    },
-];
 
 // ── Commands ───────────────────────────────────────────────────────────────────
 
@@ -133,12 +123,10 @@ pub trait Command: Send + Sync + 'static {
     }
 
     /// Named fields available on `error.*` after a failed execution.
-    /// Defaults to `DEFAULT_ERROR_FIELDS` (`code`, `message`).
-    ///
-    /// Same Phase 5 caveat as `ok_fields`: the runtime error type must match
-    /// what is declared here.
+    /// Defaults to `StandardError::FIELDS` (`code`, `message`). Commands with
+    /// richer error data override this and define their own outcome struct.
     fn error_fields(&self) -> &'static [OutcomeField] {
-        DEFAULT_ERROR_FIELDS
+        StandardError::FIELDS
     }
 }
 
