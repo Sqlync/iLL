@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use super::commands::RunOk;
 use crate::actor_type::ActorInstance;
-use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
+use crate::runtime::{
+    CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value,
+};
 
 /// Time between SIGTERM and SIGKILL during teardown.
 const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -21,7 +23,7 @@ pub struct ExecInstance {
 }
 
 impl ExecInstance {
-    pub fn spawn(args: &SpawnArgs) -> Result<Self, RuntimeError> {
+    pub fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
         let command = match args.kw("command") {
             Some(Value::String(s)) => s.clone(),
             Some(other) => {
@@ -185,10 +187,10 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn spawn_args(command: &str) -> SpawnArgs {
+    fn construct_args(command: &str) -> ConstructArgs {
         let mut kw = BTreeMap::new();
         kw.insert("command".into(), Value::String(command.into()));
-        SpawnArgs {
+        ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
         }
@@ -196,11 +198,11 @@ mod tests {
 
     #[test]
     fn missing_command_kwarg_errors() {
-        let args = SpawnArgs {
+        let args = ConstructArgs {
             keyword: BTreeMap::new(),
             source_dir: std::env::temp_dir(),
         };
-        let err = match ExecInstance::spawn(&args) {
+        let err = match ExecInstance::construct(&args) {
             Ok(_) => panic!("expected error"),
             Err(e) => e,
         };
@@ -210,7 +212,7 @@ mod tests {
     #[test]
     fn run_spawns_and_populates_pid() {
         // `sleep 60` stays alive long enough for teardown to exercise SIGTERM.
-        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
         let outcome = inst.run(None);
         match outcome {
             RunOutcome::Ok(fields) => {
@@ -226,7 +228,7 @@ mod tests {
 
     #[test]
     fn double_run_returns_error() {
-        let mut inst = ExecInstance::spawn(&spawn_args("sleep 60")).unwrap();
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
         let _ = inst.run(None);
         let second = inst.run(None);
         assert!(matches!(second, RunOutcome::Error(_)));
@@ -239,7 +241,7 @@ mod tests {
         // bash traps TERM and sleeps; teardown must escalate to SIGKILL after
         // TEARDOWN_GRACE (2s) and still report ok.
         let mut inst =
-            ExecInstance::spawn(&spawn_args("bash -c 'trap \"\" TERM; sleep 60'")).unwrap();
+            ExecInstance::construct(&construct_args("bash -c 'trap \"\" TERM; sleep 60'")).unwrap();
         let outcome = inst.run(None);
         assert!(matches!(outcome, RunOutcome::Ok(_)));
 

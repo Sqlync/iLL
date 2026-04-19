@@ -9,7 +9,7 @@ pub mod modes;
 pub mod runtime;
 
 use super::{ActorInstance, ActorType, Command, KeywordArgDef, Mode, ValueType};
-use crate::runtime::{RuntimeError, SpawnArgs};
+use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct Exec;
 
@@ -40,8 +40,8 @@ impl ActorType for Exec {
         }]
     }
 
-    fn spawn(&self, args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
-        let inst = runtime::ExecInstance::spawn(args)?;
+    fn construct(&self, args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        let inst = runtime::ExecInstance::construct(args)?;
         Ok(Box::new(inst))
     }
 }

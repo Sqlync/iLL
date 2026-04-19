@@ -1,9 +1,10 @@
 // Actor type substrate for iLL.
 //
 // Actor types are pluggable via trait objects. Phase 4 (validation) consumes
-// `&'static dyn ActorType`; Phase 5 adds runtime execution via `ActorType::spawn`
-// and `ActorInstance::execute`. Keeping everything behind `dyn` means nothing
-// outside an actor's own module needs to match on actor identity.
+// `&'static dyn ActorType`; Phase 5 adds runtime execution via
+// `ActorType::construct` and `ActorInstance::execute`. Keeping everything
+// behind `dyn` means nothing outside an actor's own module needs to match
+// on actor identity.
 //
 // `Command` carries only static metadata (name, modes, arg/outcome shapes)
 // consumed by the validator. Dispatch lives on `ActorInstance::execute`:
@@ -12,7 +13,7 @@
 
 use std::any::Any;
 
-use crate::runtime::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome};
+use crate::runtime::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome};
 
 pub mod args_actor;
 pub mod container;
@@ -156,16 +157,16 @@ pub trait ActorType: Send + Sync + 'static {
         self.modes().iter().copied().find(|m| m.name() == name)
     }
 
-    /// Spawn a runtime instance from declaration-site kwargs. Default returns
-    /// `ActorNotImplemented` — Phase 6 actors opt in by overriding this.
-    fn spawn(&self, _args: &SpawnArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+    /// Construct a runtime instance from declaration-site kwargs. Default
+    /// returns `ActorNotImplemented` — Phase 6 actors opt in by overriding.
+    fn construct(&self, _args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         Err(RuntimeError::ActorNotImplemented(self.name()))
     }
 }
 
 // ── Actor instances (runtime) ─────────────────────────────────────────────────
 //
-// A live actor. Created by `ActorType::spawn`, dispatched against by
+// A live actor. Created by `ActorType::construct`, dispatched against by
 // `execute`, torn down by `teardown`. `teardown` is idempotent — the
 // harness's RAII guard calls it on every path (success, failure, panic).
 
@@ -183,8 +184,8 @@ pub trait ActorInstance: Send {
         }
     }
 
-    /// Release any resources held by the instance. Called in reverse-spawn
-    /// order. Idempotent — safe to call more than once.
+    /// Release any resources held by the instance. Called in reverse
+    /// construction order. Idempotent — safe to call more than once.
     fn teardown(&mut self) -> TeardownOutcome;
 }
 

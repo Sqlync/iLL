@@ -123,13 +123,13 @@ fn print_failed_report(report: &TestReport) {
                     eprintln!("  {d}");
                 }
             }
-            StatementReport::SpawnFailure {
+            StatementReport::ConstructFailure {
                 actor,
                 message,
                 span,
             } => {
                 eprintln!(
-                    "  [{}..{}] spawn failed for `{actor}`: {message}",
+                    "  [{}..{}] construction failed for `{actor}`: {message}",
                     span.start, span.end
                 );
             }

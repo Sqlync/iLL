@@ -19,7 +19,7 @@ pub struct TestReport {
 pub enum StatementReport {
     ValidationFailure(Vec<Diagnostic>),
     ParseFailure(Vec<String>),
-    SpawnFailure {
+    ConstructFailure {
         actor: String,
         message: String,
         span: Span,

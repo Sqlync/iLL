@@ -1,4 +1,4 @@
-// Phase 5 runtime. Mirrors the validator's shape: spawn all actors, then
+// Phase 5 runtime. Mirrors the validator's shape: construct all actors, then
 // walk `as` blocks in order, dispatching per-actor commands. See the `exec`
 // actor's `runtime.rs` for the first concrete implementation.
 
@@ -14,11 +14,11 @@ pub mod eval;
 pub mod harness;
 pub mod report;
 
-// ── Args passed to spawn / execute ────────────────────────────────────────────
+// ── Args passed to construct / execute ────────────────────────────────────────
 
 /// Keyword arguments evaluated at an actor declaration site, plus the
 /// directory containing the .ill file (used to resolve relative paths).
-pub struct SpawnArgs {
+pub struct ConstructArgs {
     pub keyword: BTreeMap<String, Value>,
     pub source_dir: PathBuf,
 }
@@ -29,7 +29,7 @@ pub struct CommandArgs {
     pub keyword: BTreeMap<String, Value>,
 }
 
-impl SpawnArgs {
+impl ConstructArgs {
     pub fn kw(&self, name: &str) -> Option<&Value> {
         self.keyword.get(name)
     }
@@ -104,7 +104,7 @@ pub enum RuntimeError {
         got: &'static str,
         context: String,
     },
-    Spawn(String),
+    Construct(String),
     Eval(String),
 }
 
@@ -125,7 +125,7 @@ impl std::fmt::Display for RuntimeError {
                 f,
                 "type mismatch in {context}: expected {expected}, got {got}"
             ),
-            RuntimeError::Spawn(msg) => write!(f, "spawn failed: {msg}"),
+            RuntimeError::Construct(msg) => write!(f, "construct failed: {msg}"),
             RuntimeError::Eval(msg) => write!(f, "{msg}"),
         }
     }

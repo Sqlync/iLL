@@ -1,9 +1,9 @@
-// Test harness. `run_test_file` lowers, validates, spawns actors, walks
-// `as` blocks, then tears down every spawned instance regardless of outcome.
+// Test harness. `run_test_file` lowers, validates, constructs actors, walks
+// `as` blocks, then tears down every constructed instance regardless of outcome.
 //
-// The shape mirrors the validator: first pass registers/spawns actors, second
-// pass walks `as` blocks in source order. This keeps check and run from
-// drifting.
+// The shape mirrors the validator: first pass registers/constructs actors,
+// second pass walks `as` blocks in source order. This keeps check and run
+// from drifting.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use crate::validate::expr_starts_with_ident;
 use super::assert::eval_assert;
 use super::eval::{eval, Scope};
 use super::report::{StatementReport, TeardownReport, TestReport};
-use super::{CommandArgs, RunOutcome, RuntimeError, SpawnArgs, TeardownOutcome, Value};
+use super::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value};
 
 /// Run a single .ill test file and return a structured report.
 pub fn run_test_file(path: &Path, src: &str) -> TestReport {
@@ -65,15 +65,15 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     let mut statements: Vec<StatementReport> = Vec::new();
     let mut guard = TeardownGuard::new();
 
-    // Pass 1: spawn every declared actor.
+    // Pass 1: construct every declared actor.
     for item in &source.items {
         let TopLevel::ActorDeclaration(decl) = item else {
             continue;
         };
-        match spawn_actor(registry, decl, source_dir) {
+        match construct_actor(registry, decl, source_dir) {
             Ok(inst) => guard.push(decl.name.name.clone(), inst),
             Err(msg) => {
-                statements.push(StatementReport::SpawnFailure {
+                statements.push(StatementReport::ConstructFailure {
                     actor: decl.name.name.clone(),
                     message: msg,
                     span: decl.span,
@@ -82,7 +82,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
         }
     }
 
-    // Bail early if any spawn failed — don't run `as` blocks against partial fixtures.
+    // Bail early if construction failed — don't run `as` blocks against partial fixtures.
     if !statements.is_empty() {
         let teardown = guard.teardown_all();
         return TestReport {
@@ -114,7 +114,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     }
 }
 
-fn spawn_actor(
+fn construct_actor(
     registry: &Registry,
     decl: &ActorDeclaration,
     source_dir: &Path,
@@ -126,11 +126,11 @@ fn spawn_actor(
     let empty = Scope::new();
     let keyword = eval_keyword_args(&decl.keyword_args, &empty).map_err(|e| e.to_string())?;
 
-    let args = SpawnArgs {
+    let args = ConstructArgs {
         keyword,
         source_dir: source_dir.to_path_buf(),
     };
-    actor_type.spawn(&args).map_err(|e| e.to_string())
+    actor_type.construct(&args).map_err(|e| e.to_string())
 }
 
 /// Walk an `as` block. Returns true if a failure was recorded and the test
@@ -373,12 +373,12 @@ fn block_has_error_ref_after(block: &AsBlock, after: usize) -> bool {
 
 // ── Teardown ──────────────────────────────────────────────────────────────────
 //
-// Holds spawned instances in spawn order. `teardown_all` tears down in
+// Holds instances in construction order. `teardown_all` tears down in
 // reverse. `Drop` is the last-resort safety net for panics — in the normal
 // path `teardown_all` is called explicitly so results can be recorded.
 
 struct TeardownGuard {
-    /// (actor name, instance). Ordered by spawn.
+    /// (actor name, instance). Ordered by construction.
     entries: Vec<(String, Box<dyn ActorInstance>)>,
 }
 
@@ -420,7 +420,7 @@ impl TeardownGuard {
                 outcome,
             });
         }
-        reports.reverse(); // Report in spawn order for readability.
+        reports.reverse(); // Report in construction order for readability.
         reports
     }
 }
