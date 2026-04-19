@@ -1,6 +1,8 @@
-// Runtime half of the `exec` actor. Spawns the configured command as a child
-// process. `run` is spawn-only — the process stays alive until teardown sends
-// SIGTERM / SIGKILL. Stdout/stderr inherit from the runner; a bounded-buffer
+// Runtime half of the `exec` actor. Modelled as a state machine over the
+// actor's modes: `Stopped` carries only declaration data, `Running` owns the
+// live child. Transitions happen inside `execute` / `teardown` — invalid
+// operations in the wrong mode are rejected by pattern match rather than an
+// implicit flag check. Stdout/stderr inherit from the runner; a bounded-buffer
 // capture mechanism is tracked in ROADMAP (Deferred).
 
 use std::path::{Path, PathBuf};
@@ -16,10 +18,20 @@ use crate::runtime::{
 /// Time between SIGTERM and SIGKILL during teardown.
 const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
 
-pub struct ExecInstance {
+pub enum ExecInstance {
+    Stopped(Stopped),
+    Running(Running),
+}
+
+pub struct Stopped {
     command: String,
     source_dir: PathBuf,
-    child: Option<Child>,
+}
+
+pub struct Running {
+    command: String,
+    source_dir: PathBuf,
+    child: Child,
 }
 
 impl ExecInstance {
@@ -36,23 +48,33 @@ impl ExecInstance {
             None => return Err(RuntimeError::MissingKwarg { name: "command" }),
         };
 
-        Ok(Self {
+        Ok(Self::Stopped(Stopped {
             command,
             source_dir: args.source_dir.clone(),
-            child: None,
-        })
+        }))
     }
 
-    /// Start the process. Non-blocking: returns as soon as the child is
-    /// spawned. `ok.pid` carries the process id for later assertions.
-    pub fn run(&mut self, env: Option<&Value>) -> RunOutcome {
-        if self.child.is_some() {
-            return RunOutcome::error(1, "exec process already running");
-        }
+    // Cheap `Stopped` used as a scratch value for `mem::replace` so we can
+    // move `self` by value into the per-mode handlers. Never observable —
+    // `execute` / `teardown` always write a real value back before returning.
+    fn placeholder() -> Self {
+        Self::Stopped(Stopped {
+            command: String::new(),
+            source_dir: PathBuf::new(),
+        })
+    }
+}
 
+impl Stopped {
+    /// Spawn the configured command. On success, transitions to `Running`;
+    /// on any pre-spawn or spawn error, stays in `Stopped`.
+    fn run(self, env: Option<&Value>) -> (ExecInstance, RunOutcome) {
         let parts = match shlex::split(&self.command) {
             Some(p) if !p.is_empty() => p,
-            _ => return RunOutcome::error(1, format!("invalid command: {:?}", self.command)),
+            _ => {
+                let msg = format!("invalid command: {:?}", self.command);
+                return (ExecInstance::Stopped(self), RunOutcome::error(1, msg));
+            }
         };
 
         let (program, rest) = parts.split_first().unwrap();
@@ -63,57 +85,49 @@ impl ExecInstance {
 
         if let Some(env_val) = env {
             if let Err(e) = apply_env(&mut cmd, env_val) {
-                return RunOutcome::error(1, e);
+                return (ExecInstance::Stopped(self), RunOutcome::error(1, e));
             }
         }
 
         let child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return RunOutcome::error(1, format!("spawn failed: {e}")),
+            Err(e) => {
+                let msg = format!("spawn failed: {e}");
+                return (ExecInstance::Stopped(self), RunOutcome::error(1, msg));
+            }
         };
 
         let pid = child.id();
-        self.child = Some(child);
-
-        RunOutcome::Ok(RunOk { pid: pid as i64 }.into_record())
+        let running = Running {
+            command: self.command,
+            source_dir: self.source_dir,
+            child,
+        };
+        (
+            ExecInstance::Running(running),
+            RunOutcome::Ok(RunOk { pid: pid as i64 }.into_record()),
+        )
     }
 }
 
-impl ActorInstance for ExecInstance {
-    fn type_name(&self) -> &'static str {
-        "exec"
-    }
-
-    fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
-        match cmd {
-            "run" => self.run(args.kw("env")),
-            other => RunOutcome::NotImplemented {
-                actor: self.type_name(),
-                cmd: other,
-            },
-        }
-    }
-
-    fn teardown(&mut self) -> TeardownOutcome {
-        let Some(mut child) = self.child.take() else {
-            return TeardownOutcome::ok();
-        };
-
-        // Try a graceful stop first.
+impl Running {
+    /// SIGTERM, wait up to `TEARDOWN_GRACE`, then SIGKILL. Always transitions
+    /// back to `Stopped` so a second teardown is a no-op.
+    fn stop(mut self) -> (ExecInstance, TeardownOutcome) {
         #[cfg(unix)]
         unsafe {
-            libc::kill(child.id() as i32, libc::SIGTERM);
+            libc::kill(self.child.id() as i32, libc::SIGTERM);
         }
         #[cfg(not(unix))]
         {
-            let _ = child.kill();
+            let _ = self.child.kill();
         }
 
         let deadline = Instant::now() + TEARDOWN_GRACE;
         let mut outcome = TeardownOutcome::ok();
         loop {
-            match child.try_wait() {
-                Ok(Some(_)) => return outcome,
+            match self.child.try_wait() {
+                Ok(Some(_)) => return (self.into_stopped(), outcome),
                 Ok(None) => {
                     if Instant::now() >= deadline {
                         break;
@@ -129,19 +143,48 @@ impl ActorInstance for ExecInstance {
 
         // `Child::kill` is Ok if the child has already exited, so any Err here
         // is a genuine failure (e.g. permission denied).
-        if let Err(e) = child.kill() {
+        if let Err(e) = self.child.kill() {
             outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
         }
-        let _ = child.wait();
-        outcome
+        let _ = self.child.wait();
+        (self.into_stopped(), outcome)
+    }
+
+    fn into_stopped(self) -> ExecInstance {
+        ExecInstance::Stopped(Stopped {
+            command: self.command,
+            source_dir: self.source_dir,
+        })
     }
 }
 
-impl Drop for ExecInstance {
-    fn drop(&mut self) {
-        if self.child.is_some() {
-            let _ = self.teardown();
-        }
+impl ActorInstance for ExecInstance {
+    fn type_name(&self) -> &'static str {
+        "exec"
+    }
+
+    fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
+        let taken = std::mem::replace(self, Self::placeholder());
+        let (next, outcome) = match (taken, cmd) {
+            (Self::Stopped(s), "run") => s.run(args.kw("env")),
+            (Self::Running(r), "run") => (
+                Self::Running(r),
+                RunOutcome::error(1, "exec process already running"),
+            ),
+            (other, cmd) => (other, RunOutcome::NotImplemented { actor: "exec", cmd }),
+        };
+        *self = next;
+        outcome
+    }
+
+    fn teardown(&mut self) -> TeardownOutcome {
+        let taken = std::mem::replace(self, Self::placeholder());
+        let (next, outcome) = match taken {
+            Self::Stopped(s) => (Self::Stopped(s), TeardownOutcome::ok()),
+            Self::Running(r) => r.stop(),
+        };
+        *self = next;
+        outcome
     }
 }
 
@@ -196,6 +239,13 @@ mod tests {
         }
     }
 
+    fn empty_args() -> CommandArgs {
+        CommandArgs {
+            positional: Vec::new(),
+            keyword: BTreeMap::new(),
+        }
+    }
+
     #[test]
     fn missing_command_kwarg_errors() {
         let args = ConstructArgs {
@@ -213,7 +263,9 @@ mod tests {
     fn run_spawns_and_populates_pid() {
         // `sleep 60` stays alive long enough for teardown to exercise SIGTERM.
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        let outcome = inst.run(None);
+        assert!(matches!(inst, ExecInstance::Stopped(_)));
+
+        let outcome = inst.execute("run", &empty_args());
         match outcome {
             RunOutcome::Ok(fields) => {
                 let pid = fields.get("pid").expect("pid field");
@@ -222,17 +274,30 @@ mod tests {
             RunOutcome::Error(f) => panic!("expected Ok, got Error: {f:?}"),
             RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
         }
+        assert!(matches!(inst, ExecInstance::Running(_)));
+
         let td = inst.teardown();
         assert!(td.ok, "teardown failed: {:?}", td.message);
+        assert!(matches!(inst, ExecInstance::Stopped(_)));
     }
 
     #[test]
     fn double_run_returns_error() {
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        let _ = inst.run(None);
-        let second = inst.run(None);
+        let _ = inst.execute("run", &empty_args());
+        let second = inst.execute("run", &empty_args());
         assert!(matches!(second, RunOutcome::Error(_)));
         let _ = inst.teardown();
+    }
+
+    #[test]
+    fn teardown_when_stopped_is_noop() {
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
+        let td = inst.teardown();
+        assert!(td.ok);
+        // Second teardown is still a no-op.
+        let td = inst.teardown();
+        assert!(td.ok);
     }
 
     #[test]
@@ -242,7 +307,7 @@ mod tests {
         // TEARDOWN_GRACE (2s) and still report ok.
         let mut inst =
             ExecInstance::construct(&construct_args("bash -c 'trap \"\" TERM; sleep 60'")).unwrap();
-        let outcome = inst.run(None);
+        let outcome = inst.execute("run", &empty_args());
         assert!(matches!(outcome, RunOutcome::Ok(_)));
 
         // Give bash time to install the trap before we send SIGTERM, otherwise
