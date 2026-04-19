@@ -31,6 +31,12 @@ pub enum ExecMode {
     Running(Running),
 }
 
+impl Default for ExecMode {
+    fn default() -> Self {
+        ExecMode::Stopped(Stopped)
+    }
+}
+
 pub struct Stopped;
 
 pub struct Running {
@@ -226,8 +232,7 @@ impl ActorInstance for ExecInstance {
     }
 
     fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
-        let taken = std::mem::replace(&mut self.mode, ExecMode::Stopped(Stopped));
-        let (next, outcome) = match taken {
+        let (next, outcome) = match std::mem::take(&mut self.mode) {
             ExecMode::Stopped(s) => s.execute(&self.target, &self.source_dir, cmd, args),
             ExecMode::Running(r) => r.execute(cmd, args),
         };
@@ -236,8 +241,7 @@ impl ActorInstance for ExecInstance {
     }
 
     fn teardown(&mut self) -> TeardownOutcome {
-        let taken = std::mem::replace(&mut self.mode, ExecMode::Stopped(Stopped));
-        let (next, outcome) = match taken {
+        let (next, outcome) = match std::mem::take(&mut self.mode) {
             ExecMode::Stopped(s) => (ExecMode::Stopped(s), TeardownOutcome::ok()),
             ExecMode::Running(r) => r.stop(),
         };
