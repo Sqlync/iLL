@@ -65,42 +65,28 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     let mut statements: Vec<StatementReport> = Vec::new();
     let mut guard = TeardownGuard::new();
 
-    // Pass 1: construct every declared actor.
+    // Walk top-level items in source order: construct actors as we encounter
+    // them, run `as` blocks against whatever's already live. Any failure stops
+    // the walk — teardown still runs via `guard` for everything constructed
+    // so far.
     for item in &source.items {
-        let TopLevel::ActorDeclaration(decl) = item else {
-            continue;
-        };
-        match construct_actor(registry, decl, source_dir) {
-            Ok(inst) => guard.push(decl.name.name.clone(), inst),
-            Err(msg) => {
-                statements.push(StatementReport::ConstructFailure {
-                    actor: decl.name.name.clone(),
-                    message: msg,
-                    span: decl.span,
-                });
+        match item {
+            TopLevel::ActorDeclaration(decl) => match construct_actor(registry, decl, source_dir) {
+                Ok(inst) => guard.push(decl.name.name.clone(), inst),
+                Err(msg) => {
+                    statements.push(StatementReport::ConstructFailure {
+                        actor: decl.name.name.clone(),
+                        message: msg,
+                        span: decl.span,
+                    });
+                    break;
+                }
+            },
+            TopLevel::AsBlock(block) => {
+                if run_as_block(block, &mut guard, &mut statements) {
+                    break;
+                }
             }
-        }
-    }
-
-    // Bail early if construction failed — don't run `as` blocks against partial fixtures.
-    if !statements.is_empty() {
-        let teardown = guard.teardown_all();
-        return TestReport {
-            path: path.to_path_buf(),
-            passed: false,
-            statements,
-            teardown,
-        };
-    }
-
-    // Pass 2: walk each `as` block.
-    for item in &source.items {
-        let TopLevel::AsBlock(block) = item else {
-            continue;
-        };
-        let block_failed = run_as_block(block, &mut guard, &mut statements);
-        if block_failed {
-            break;
         }
     }
 
