@@ -31,7 +31,44 @@ pub struct Stopped {
 pub struct Running {
     command: String,
     source_dir: PathBuf,
-    child: Child,
+    child: KillOnDrop,
+}
+
+/// Wraps a `Child` so that dropping the wrapper SIGKILLs the process if it
+/// hasn't been explicitly reaped. `Running::stop` calls `disarm` at the end
+/// of a clean teardown; the Drop fallback exists to catch panics that escape
+/// between `Stopped::run` and teardown.
+struct KillOnDrop(Option<Child>);
+
+impl KillOnDrop {
+    fn new(c: Child) -> Self {
+        Self(Some(c))
+    }
+
+    fn as_mut(&mut self) -> &mut Child {
+        self.0.as_mut().expect("child present until disarm")
+    }
+
+    /// Suppress the drop-time SIGKILL. Caller asserts the child has already
+    /// been waited on.
+    fn disarm(&mut self) {
+        let _ = self.0.take();
+    }
+}
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let Some(mut c) = self.0.take() else { return };
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(c.id() as i32, libc::SIGKILL);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = c.kill();
+        }
+        let _ = c.wait();
+    }
 }
 
 impl ExecInstance {
@@ -101,7 +138,7 @@ impl Stopped {
         let running = Running {
             command: self.command,
             source_dir: self.source_dir,
-            child,
+            child: KillOnDrop::new(child),
         };
         (
             ExecInstance::Running(running),
@@ -112,22 +149,27 @@ impl Stopped {
 
 impl Running {
     /// SIGTERM, wait up to `TEARDOWN_GRACE`, then SIGKILL. Always transitions
-    /// back to `Stopped` so a second teardown is a no-op.
+    /// back to `Stopped` so a second teardown is a no-op. Disarms `KillOnDrop`
+    /// at the tail — we've already reaped the child, so the drop-time fallback
+    /// has nothing to do.
     fn stop(mut self) -> (ExecInstance, TeardownOutcome) {
         #[cfg(unix)]
         unsafe {
-            libc::kill(self.child.id() as i32, libc::SIGTERM);
+            libc::kill(self.child.as_mut().id() as i32, libc::SIGTERM);
         }
         #[cfg(not(unix))]
         {
-            let _ = self.child.kill();
+            let _ = self.child.as_mut().kill();
         }
 
         let deadline = Instant::now() + TEARDOWN_GRACE;
         let mut outcome = TeardownOutcome::ok();
         loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => return (self.into_stopped(), outcome),
+            match self.child.as_mut().try_wait() {
+                Ok(Some(_)) => {
+                    self.child.disarm();
+                    return (self.into_stopped(), outcome);
+                }
                 Ok(None) => {
                     if Instant::now() >= deadline {
                         break;
@@ -143,10 +185,11 @@ impl Running {
 
         // `Child::kill` is Ok if the child has already exited, so any Err here
         // is a genuine failure (e.g. permission denied).
-        if let Err(e) = self.child.kill() {
+        if let Err(e) = self.child.as_mut().kill() {
             outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
         }
-        let _ = self.child.wait();
+        let _ = self.child.as_mut().wait();
+        self.child.disarm();
         (self.into_stopped(), outcome)
     }
 
@@ -288,6 +331,25 @@ mod tests {
         let second = inst.execute("run", &empty_args());
         assert!(matches!(second, RunOutcome::Error(_)));
         let _ = inst.teardown();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn kill_on_drop_reaps_child() {
+        // Spawn a long sleeper directly, drop the wrapper, and verify the
+        // kernel no longer knows about the pid.
+        let child = StdCommand::new("sleep").arg("60").spawn().unwrap();
+        let pid = child.id() as i32;
+        let guard = KillOnDrop::new(child);
+        drop(guard);
+        // KillOnDrop::drop calls wait(), so the process is reaped before drop
+        // returns. `kill(pid, 0)` probes existence without delivering a signal.
+        let res = unsafe { libc::kill(pid, 0) };
+        assert_eq!(res, -1, "process still exists after KillOnDrop::drop");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
     }
 
     #[test]
