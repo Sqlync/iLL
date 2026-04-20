@@ -10,10 +10,10 @@ define_outcome! {
 }
 
 define_outcome! {
-    /// exec-specific error details. Nested under `error.exec.*`.
-    ///
-    /// `reason` is one of the atoms documented in
-    /// [`super::runtime::RunErrorReason`].
+    /// exec-specific error details. Nested under `error.exec.*`. `reason`
+    /// is one of the atoms classified in `super::runtime`: `:invalid_command`,
+    /// `:command_not_found`, `:permission_denied`, `:spawn_failed`,
+    /// `:bad_env`, `:already_running`.
     pub ExecErrorDetails {
         reason: Atom,
     }
