@@ -4,8 +4,8 @@
 // lives on `ExecInstance`; valid iLL commands per mode live as methods on
 // the mode variants. Invalid operations in the wrong mode are rejected by
 // pattern match rather than an implicit flag check. Stdout/stderr inherit
-// from the runner; a bounded-buffer capture mechanism is tracked in ROADMAP
-// (Deferred).
+// from the runner; a bounded-buffer capture mechanism is tracked in
+// DEFERRED.md.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
