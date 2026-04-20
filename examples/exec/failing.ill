@@ -7,4 +7,5 @@ actor never_runs = exec,
 
 as never_runs:
   run
+  assert error.type == :exec
   assert error.exec.reason == :command_not_found
