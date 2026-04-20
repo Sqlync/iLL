@@ -23,13 +23,12 @@ Each `.ill` file is a single test. The following "actors" are currently targeted
 
 | Actor | Description | Examples | Implemented |
 | --- | --- | --- | --- |
-| exec | Shell Command | [examples/exec/](examples/exec/) | [x] |
-| pg_client | Postgres Client | [examples/pg_client/](examples/pg_client/) | [ ] |
-| rest | REST client | [examples/rest/](examples/rest/) | [ ] |
-| mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | [ ] |
-| container | Docker Container | [examples/container/](examples/container/) | [ ] |
-| args | Commandline Arguments | [examples/built-in/args.ill](examples/built-in/args.ill) | [ ] |
-
+| exec | Shell command | [examples/exec/](examples/exec/) | ✅ |
+| pg_client | Postgres client | [examples/pg_client/](examples/pg_client/) | ⬜ |
+| rest | REST client | [examples/rest/](examples/rest/) | ⬜ |
+| mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | ⬜ |
+| container | Docker container | [examples/container/](examples/container/) | ⬜ |
+| args | Command-line arguments | [examples/built-in/args.ill](examples/built-in/args.ill) | ⬜ |
 
 Some language specific dockerfile examples are available at [examples/container/languages/](examples/container/languages/) or you could just run with the exec actor. More concrete examples to come on this.
 
