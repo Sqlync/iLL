@@ -1,5 +1,13 @@
 use super::modes::{RUNNING, STOPPED};
-use crate::actor_type::{Command, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{Command, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::define_outcome;
+
+define_outcome! {
+    /// Result of `exec.run` — the spawned child's process id.
+    pub RunOk {
+        pid: Number,
+    }
+}
 
 pub struct Run;
 
@@ -24,6 +32,10 @@ impl Command for Run {
             ty: ValueType::Unknown,
             required: false,
         }]
+    }
+
+    fn ok_fields(&self) -> &'static [OutcomeField] {
+        RunOk::FIELDS
     }
 }
 

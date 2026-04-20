@@ -6,8 +6,10 @@
 
 pub mod commands;
 pub mod modes;
+pub mod runtime;
 
-use super::{ActorType, Command, KeywordArgDef, Mode, ValueType};
+use super::{ActorInstance, ActorType, Command, KeywordArgDef, Mode, ValueType};
+use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct Exec;
 
@@ -36,6 +38,11 @@ impl ActorType for Exec {
             ty: ValueType::String,
             required: true,
         }]
+    }
+
+    fn construct(&self, args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        let inst = runtime::ExecInstance::construct(args)?;
+        Ok(Box::new(inst))
     }
 }
 

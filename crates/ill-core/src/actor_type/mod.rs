@@ -1,18 +1,29 @@
 // Actor type substrate for iLL.
 //
 // Actor types are pluggable via trait objects. Phase 4 (validation) consumes
-// `&'static dyn ActorType`; Phase 5 will add runtime execution as a sibling
-// trait. Keeping everything behind `dyn` means nothing outside an actor's own
-// module needs to match on actor identity.
+// `&'static dyn ActorType`; Phase 5 adds runtime execution via
+// `ActorType::construct` and `ActorInstance::execute`. Keeping everything
+// behind `dyn` means nothing outside an actor's own module needs to match
+// on actor identity.
+//
+// `Command` carries only static metadata (name, modes, arg/outcome shapes)
+// consumed by the validator. Dispatch lives on `ActorInstance::execute`:
+// `self` is already the concrete instance type inside the impl, so no
+// downcast is needed — the vtable does that work.
 
 use std::any::Any;
+
+use crate::runtime::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome};
 
 pub mod args_actor;
 pub mod container;
 pub mod exec;
 pub mod http_client;
 pub mod mqtt_client;
+pub mod outcome;
 pub mod pg_client;
+
+pub use outcome::StandardError;
 
 // ── Modes ──────────────────────────────────────────────────────────────────────
 //
@@ -71,26 +82,13 @@ pub struct KeywordArgDef {
 // ── Outcome field descriptors ──────────────────────────────────────────────────
 //
 // Declare the named fields available on `ok.*` and `error.*` after a command.
-// Commands that don't override `ok_fields` / `error_fields` return empty slices
-// for ok and `DEFAULT_ERROR_FIELDS` for error.
+// Commands that don't override `ok_fields` / `error_fields` return an empty
+// slice for ok and `StandardError::FIELDS` for error.
 
 pub struct OutcomeField {
     pub name: &'static str,
     pub ty: ValueType,
 }
-
-/// Fields present on `error.*` for every command that can fail with a
-/// structured error. Commands may override `error_fields` to add more.
-pub static DEFAULT_ERROR_FIELDS: &[OutcomeField] = &[
-    OutcomeField {
-        name: "code",
-        ty: ValueType::Number,
-    },
-    OutcomeField {
-        name: "message",
-        ty: ValueType::String,
-    },
-];
 
 // ── Commands ───────────────────────────────────────────────────────────────────
 
@@ -126,17 +124,11 @@ pub trait Command: Send + Sync + 'static {
     }
 
     /// Named fields available on `error.*` after a failed execution.
-    /// Defaults to `DEFAULT_ERROR_FIELDS` (`code`, `message`).
-    ///
-    /// Same Phase 5 caveat as `ok_fields`: the runtime error type must match
-    /// what is declared here.
+    /// Defaults to `StandardError::FIELDS` (`code`, `message`). Commands with
+    /// richer error data override this and define their own outcome struct.
     fn error_fields(&self) -> &'static [OutcomeField] {
-        DEFAULT_ERROR_FIELDS
+        StandardError::FIELDS
     }
-
-    // Phase 5 will add something like:
-    //   fn execute(&self, instance: &mut dyn ActorInstance, args: &Args)
-    //     -> Result<Value, RuntimeError>;
 }
 
 // ── Actor types ────────────────────────────────────────────────────────────────
@@ -164,6 +156,37 @@ pub trait ActorType: Send + Sync + 'static {
     fn mode(&self, name: &str) -> Option<&'static dyn Mode> {
         self.modes().iter().copied().find(|m| m.name() == name)
     }
+
+    /// Construct a runtime instance from declaration-site kwargs. Default
+    /// returns `ActorNotImplemented` — Phase 6 actors opt in by overriding.
+    fn construct(&self, _args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        Err(RuntimeError::ActorNotImplemented(self.name()))
+    }
+}
+
+// ── Actor instances (runtime) ─────────────────────────────────────────────────
+//
+// A live actor. Created by `ActorType::construct`, dispatched against by
+// `execute`, torn down by `teardown`. `teardown` is idempotent — the
+// harness's RAII guard calls it on every path (success, failure, panic).
+
+pub trait ActorInstance: Send {
+    fn type_name(&self) -> &'static str;
+
+    /// Run a validated command against this instance. `cmd` is the command's
+    /// static name (as returned by `Command::name`), so the default
+    /// `NotImplemented` arm can pass it through without allocation. Default
+    /// returns `NotImplemented` — Phase 6 actors opt in by overriding this.
+    fn execute(&mut self, cmd: &'static str, _args: &CommandArgs) -> RunOutcome {
+        RunOutcome::NotImplemented {
+            actor: self.type_name(),
+            cmd,
+        }
+    }
+
+    /// Release any resources held by the instance. Called in reverse
+    /// construction order. Idempotent — safe to call more than once.
+    fn teardown(&mut self) -> TeardownOutcome;
 }
 
 #[cfg(test)]

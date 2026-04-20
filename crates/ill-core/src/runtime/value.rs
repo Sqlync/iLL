@@ -1,0 +1,66 @@
+// Runtime values. Mirrors `ValueType` 1:1 plus `Record` (for `ok.*` /
+// `error.*` / struct-shaped kwargs) and `Unit` (for values not yet available,
+// e.g. `ok.exit` before process teardown).
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    String(String),
+    Number(i64),
+    Bool(bool),
+    Atom(String),
+    Bytes(Vec<u8>),
+    Array(Vec<Value>),
+    Record(BTreeMap<String, Value>),
+    Unit,
+}
+
+impl Value {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::String(_) => "string",
+            Value::Number(_) => "number",
+            Value::Bool(_) => "bool",
+            Value::Atom(_) => "atom",
+            Value::Bytes(_) => "bytes",
+            Value::Array(_) => "array",
+            Value::Record(_) => "record",
+            Value::Unit => "unit",
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::String(s) => write!(f, "{s:?}"),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Atom(a) => write!(f, ":{a}"),
+            Value::Bytes(b) => write!(f, "<{} bytes>", b.len()),
+            Value::Array(items) => {
+                write!(f, "[")?;
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
+            Value::Record(fields) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
+            }
+            Value::Unit => write!(f, "()"),
+        }
+    }
+}
