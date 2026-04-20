@@ -35,14 +35,14 @@ Mode checking, name resolution (does this actor exist?), type checking (is this 
 ## Phase 5: First Actor — Exec Runtime
 End-to-end vertical slice with the simplest actor: run a command on the host, capture output, check assertions. Establishes the harness, lifecycle, and assertion machinery that later actors reuse. Build only what exec needs; resist generalizing.
 
-- [ ] Exec runtime (command, args, env, timeout, stdout/stderr capture, exit code)
-- [ ] Enough expression/binding/assertion support to run exec examples
-- [ ] Test harness reporting (pass/fail, exit codes) proven against exec tests
-- [ ] Teardown semantics, including failure paths
+- [x] Exec runtime (command, args, env, timeout, stdout/stderr capture, exit code)
+- [x] Enough expression/binding/assertion support to run exec examples
+- [x] Test harness reporting (pass/fail, exit codes) proven against exec tests
 
 ## Phase 6: Implement the rest of the Actors
 In any order
 
+- [ ] Handle intentionally failing exec actor
 - [ ] Built-in actors (assert, env, etc.)
 - [ ] Container (image/dockerfile, run, lifecycle, shell)
 - [ ] Postgres (start/stop, client, queries)
