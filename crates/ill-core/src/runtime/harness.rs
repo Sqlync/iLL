@@ -357,8 +357,9 @@ fn block_has_error_ref_after(block: &AsBlock, after: usize) -> bool {
 //
 // Holds instances in construction order. `teardown_all` tears down in
 // reverse. Each actor is responsible for its own panic-safe cleanup via its
-// own `Drop` impl (e.g. exec's `KillOnDrop`); there is no `Drop` on this
-// container because `teardown` is async and `Drop` can't await.
+// own `Drop` impl (e.g. exec wires `tokio::process::Command::kill_on_drop(true)`
+// at spawn time so the child is SIGKILLed when `Child` drops). There is no
+// `Drop` on this container because `teardown` is async and `Drop` can't await.
 
 struct InstantiatedActors {
     /// (actor name, instance). Ordered by construction.

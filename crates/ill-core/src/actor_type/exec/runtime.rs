@@ -445,10 +445,14 @@ mod tests {
         };
 
         drop(inst);
+        wait_for_esrch(pid).await;
+    }
 
-        // Tokio's kill_on_drop reaps asynchronously. Poll up to 2s for the
-        // kernel to forget the pid. `kill(pid, 0)` probes existence without
-        // delivering a signal.
+    /// Common helper: poll `kill(pid, 0)` up to 2s waiting for ESRCH, the
+    /// signal that the kernel no longer knows about the pid (child was
+    /// SIGKILLed and reaped).
+    #[cfg(unix)]
+    async fn wait_for_esrch(pid: i32) {
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             let res = unsafe { libc::kill(pid, 0) };
@@ -456,10 +460,46 @@ mod tests {
                 return;
             }
             if std::time::Instant::now() >= deadline {
-                panic!("process {pid} still exists after instance drop");
+                panic!("process {pid} still exists after deadline");
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn panic_during_test_body_reaps_child() {
+        // Simulate a mid-test panic: construct, run, then unwind the scope
+        // that owns the instance. The panic triggers drop on `inst` during
+        // unwind, which must still SIGKILL the child via kill_on_drop. This
+        // is the panic path `InstantiatedActors::Drop` used to cover before
+        // we removed it in favor of each actor's own panic-safe Drop.
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        let pid = match outcome {
+            RunOutcome::Ok(fields) => match fields.get("pid") {
+                Some(Value::Number(n)) => *n as i32,
+                _ => panic!("expected numeric pid"),
+            },
+            RunOutcome::Error { variant, fields } => {
+                panic!("expected Ok, got Error: variant={variant}, fields={fields:?}")
+            }
+            RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
+        };
+
+        // Move `inst` into a closure that panics. `catch_unwind` traps the
+        // panic so the test itself keeps running; during the unwind, `inst`
+        // drops and Child's `kill_on_drop` fires.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _inst = inst;
+            panic!("simulated mid-test panic");
+        }));
+        assert!(
+            result.is_err(),
+            "expected panic to propagate via catch_unwind"
+        );
+
+        wait_for_esrch(pid).await;
     }
 
     #[tokio::test]
