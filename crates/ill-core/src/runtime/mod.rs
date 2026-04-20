@@ -47,15 +47,12 @@ impl CommandArgs {
 /// `error.*`. `NotImplemented` is the default for Phase 6 actors that haven't
 /// yet been wired to a runtime.
 ///
-/// An `Error` carries the declared variant name, a generic human-readable
-/// message (always available as `error.message`), and the variant-specific
-/// fields. The harness assembles the final `error` record as
-/// `{ type: :variant, message: "...", <variant>: {fields} }`.
+/// An `Error` carries the declared variant name and its fields. The harness
+/// assembles the final `error` record as `{ type: :variant, <variant>: {fields} }`.
 pub enum RunOutcome {
     Ok(BTreeMap<String, Value>),
     Error {
         variant: &'static str,
-        message: String,
         fields: BTreeMap<String, Value>,
     },
     NotImplemented {

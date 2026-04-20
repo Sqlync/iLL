@@ -27,10 +27,9 @@ const REASON_SPAWN_FAILED: &str = "spawn_failed";
 const REASON_BAD_ENV: &str = "bad_env";
 const REASON_ALREADY_RUNNING: &str = "already_running";
 
-fn run_error(reason: &str, message: impl Into<String>) -> RunOutcome {
+fn run_error(reason: &str) -> RunOutcome {
     RunOutcome::Error {
         variant: "exec",
-        message: message.into(),
         fields: ExecError {
             reason: reason.into(),
         }
@@ -157,11 +156,7 @@ impl Stopped {
         let parts = match shlex::split(target) {
             Some(p) if !p.is_empty() => p,
             _ => {
-                let msg = format!("invalid command: {target:?}");
-                return (
-                    ExecMode::Stopped(self),
-                    run_error(REASON_INVALID_COMMAND, msg),
-                );
+                return (ExecMode::Stopped(self), run_error(REASON_INVALID_COMMAND));
             }
         };
 
@@ -172,8 +167,8 @@ impl Stopped {
         cmd.args(rest).current_dir(source_dir);
 
         if let Some(env_val) = env {
-            if let Err(e) = apply_env(&mut cmd, env_val) {
-                return (ExecMode::Stopped(self), run_error(REASON_BAD_ENV, e));
+            if apply_env(&mut cmd, env_val).is_err() {
+                return (ExecMode::Stopped(self), run_error(REASON_BAD_ENV));
             }
         }
 
@@ -181,8 +176,7 @@ impl Stopped {
             Ok(c) => c,
             Err(e) => {
                 let reason = classify_spawn_error(&e);
-                let msg = format!("spawn failed: {e}");
-                return (ExecMode::Stopped(self), run_error(reason, msg));
+                return (ExecMode::Stopped(self), run_error(reason));
             }
         };
 
@@ -199,10 +193,7 @@ impl Stopped {
 impl Running {
     fn execute(self, cmd: &'static str, _args: &CommandArgs) -> (ExecMode, RunOutcome) {
         match cmd {
-            "run" => (
-                ExecMode::Running(self),
-                run_error(REASON_ALREADY_RUNNING, "exec process already running"),
-            ),
+            "run" => (ExecMode::Running(self), run_error(REASON_ALREADY_RUNNING)),
             other => (
                 ExecMode::Running(self),
                 RunOutcome::NotImplemented {
@@ -366,7 +357,9 @@ mod tests {
                 let pid = fields.get("pid").expect("pid field");
                 assert!(matches!(pid, Value::Number(n) if *n > 0));
             }
-            RunOutcome::Error { message, .. } => panic!("expected Ok, got Error: {message}"),
+            RunOutcome::Error { variant, fields } => {
+                panic!("expected Ok, got Error: variant={variant}, fields={fields:?}")
+            }
             RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
         }
         assert!(matches!(inst.mode, ExecMode::Running(_)));

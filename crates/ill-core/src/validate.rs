@@ -417,7 +417,6 @@ fn resolve_outcome_chain(
                 .map(|f| f.ty),
             "error" => match property.name.as_str() {
                 "type" => Some(ValueType::Atom),
-                "message" => Some(ValueType::String),
                 // Bare `error.<variant>` — variant exists but isn't a leaf.
                 _ => last_error_types
                     .iter()

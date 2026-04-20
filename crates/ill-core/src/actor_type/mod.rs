@@ -82,9 +82,8 @@ pub struct KeywordArgDef {
 // Declare the named fields available on `ok.*` after a successful command.
 // Error outcomes use `ErrorTypeDef` instead — each command declares a list of
 // possible error variants, each with its own fields. The harness always
-// surfaces `error.type` (atom naming the variant) and `error.message`
-// (generic string) so tests can report on an unexpected variant without
-// knowing its schema.
+// surfaces `error.type` (atom naming the variant) so tests can report on an
+// unexpected variant without knowing its schema.
 
 pub struct OutcomeField {
     pub name: &'static str,
@@ -133,8 +132,8 @@ pub trait Command: Send + Sync + 'static {
 
     /// Possible error variants this command can produce. Each variant's
     /// fields are addressable as `error.<variant_name>.<field>`. Defaults to
-    /// empty — `error.type` and `error.message` are always available
-    /// regardless of declared variants.
+    /// empty — `error.type` is always available regardless of declared
+    /// variants.
     fn error_types(&self) -> &'static [ErrorTypeDef] {
         &[]
     }
