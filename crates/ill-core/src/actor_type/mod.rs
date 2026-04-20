@@ -175,9 +175,12 @@ pub trait ActorType: Send + Sync + 'static {
 // ── Actor instances (runtime) ─────────────────────────────────────────────────
 //
 // A live actor. Created by `ActorType::construct`, dispatched against by
-// `execute`, torn down by `teardown`. `teardown` is idempotent — the
-// harness's RAII guard calls it on every path (success, failure, panic).
+// `execute`, torn down by `teardown`. `teardown` is idempotent — the harness
+// calls it on the happy path (success or command failure). On panic, each
+// actor's own `Drop` impl is responsible for emergency resource cleanup
+// (e.g. exec's `KillOnDrop`).
 
+#[async_trait::async_trait]
 pub trait ActorInstance: Send {
     fn type_name(&self) -> &'static str;
 
@@ -185,7 +188,7 @@ pub trait ActorInstance: Send {
     /// static name (as returned by `Command::name`), so the default
     /// `NotImplemented` arm can pass it through without allocation. Default
     /// returns `NotImplemented` — Phase 6 actors opt in by overriding this.
-    fn execute(&mut self, cmd: &'static str, _args: &CommandArgs) -> RunOutcome {
+    async fn execute(&mut self, cmd: &'static str, _args: &CommandArgs) -> RunOutcome {
         RunOutcome::NotImplemented {
             actor: self.type_name(),
             cmd,
@@ -194,7 +197,7 @@ pub trait ActorInstance: Send {
 
     /// Release any resources held by the instance. Called in reverse
     /// construction order. Idempotent — safe to call more than once.
-    fn teardown(&mut self) -> TeardownOutcome;
+    async fn teardown(&mut self) -> TeardownOutcome;
 }
 
 #[cfg(test)]

@@ -9,8 +9,9 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command as StdCommand};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tokio::process::{Child, Command as TokioCommand};
 
 use super::commands::{ExecError, RunOk};
 use crate::actor_type::ActorInstance;
@@ -68,44 +69,12 @@ impl Default for ExecMode {
 pub struct Stopped;
 
 pub struct Running {
-    child: KillOnDrop,
-}
-
-/// Wraps a `Child` so that dropping the wrapper SIGKILLs the process if it
-/// hasn't been explicitly reaped. `Running::stop` calls `disarm` at the end
-/// of a clean teardown; the Drop fallback exists to catch panics that escape
-/// between `Stopped::run` and teardown.
-struct KillOnDrop(Option<Child>);
-
-impl KillOnDrop {
-    fn new(c: Child) -> Self {
-        Self(Some(c))
-    }
-
-    fn as_mut(&mut self) -> &mut Child {
-        self.0.as_mut().expect("child present until disarm")
-    }
-
-    /// Suppress the drop-time SIGKILL. Caller asserts the child has already
-    /// been waited on.
-    fn disarm(&mut self) {
-        let _ = self.0.take();
-    }
-}
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        let Some(mut c) = self.0.take() else { return };
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(c.id() as i32, libc::SIGKILL);
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = c.kill();
-        }
-        let _ = c.wait();
-    }
+    /// The spawned child. Tokio's `.kill_on_drop(true)` on the Command (set
+    /// at spawn time in `Stopped::run`) means a panic that drops this field
+    /// before teardown runs will still SIGKILL + reap the child via the
+    /// runtime's child reaper. Happy-path teardown via `Running::stop`
+    /// explicitly SIGTERMs, waits, and only SIGKILLs on timeout.
+    child: Child,
 }
 
 impl ExecInstance {
@@ -131,7 +100,7 @@ impl ExecInstance {
 }
 
 impl Stopped {
-    fn execute(
+    async fn execute(
         self,
         target: &str,
         source_dir: &Path,
@@ -139,7 +108,7 @@ impl Stopped {
         args: &CommandArgs,
     ) -> (ExecMode, RunOutcome) {
         match cmd {
-            "run" => self.run(target, source_dir, args.kw("env")),
+            "run" => self.run(target, source_dir, args.kw("env")).await,
             other => (
                 ExecMode::Stopped(self),
                 RunOutcome::NotImplemented {
@@ -152,7 +121,12 @@ impl Stopped {
 
     /// Spawn the configured target. On success, transitions to `Running`;
     /// on any pre-spawn or spawn error, stays in `Stopped`.
-    fn run(self, target: &str, source_dir: &Path, env: Option<&Value>) -> (ExecMode, RunOutcome) {
+    async fn run(
+        self,
+        target: &str,
+        source_dir: &Path,
+        env: Option<&Value>,
+    ) -> (ExecMode, RunOutcome) {
         let parts = match shlex::split(target) {
             Some(p) if !p.is_empty() => p,
             _ => {
@@ -163,8 +137,8 @@ impl Stopped {
         let (program, rest) = parts.split_first().unwrap();
         let resolved = resolve_program(program, source_dir);
 
-        let mut cmd = StdCommand::new(&resolved);
-        cmd.args(rest).current_dir(source_dir);
+        let mut cmd = TokioCommand::new(&resolved);
+        cmd.args(rest).current_dir(source_dir).kill_on_drop(true);
 
         if let Some(env_val) = env {
             if apply_env(&mut cmd, env_val).is_err() {
@@ -180,18 +154,18 @@ impl Stopped {
             }
         };
 
-        let pid = child.id();
+        // `Child::id()` returns `None` after the child has been awaited;
+        // right after spawn it's always `Some`.
+        let pid = child.id().unwrap_or(0);
         (
-            ExecMode::Running(Running {
-                child: KillOnDrop::new(child),
-            }),
+            ExecMode::Running(Running { child }),
             RunOutcome::Ok(RunOk { pid: pid as i64 }.into_record()),
         )
     }
 }
 
 impl Running {
-    fn execute(self, cmd: &'static str, _args: &CommandArgs) -> (ExecMode, RunOutcome) {
+    async fn execute(self, cmd: &'static str, _args: &CommandArgs) -> (ExecMode, RunOutcome) {
         match cmd {
             "run" => (ExecMode::Running(self), run_error(REASON_ALREADY_RUNNING)),
             other => (
@@ -205,69 +179,62 @@ impl Running {
     }
 
     /// SIGTERM, wait up to `TEARDOWN_GRACE`, then SIGKILL. Always transitions
-    /// back to `Stopped` so a second teardown is a no-op. Disarms `KillOnDrop`
-    /// at the tail — we've already reaped the child, so the drop-time fallback
-    /// has nothing to do.
-    fn stop(mut self) -> (ExecMode, TeardownOutcome) {
+    /// back to `Stopped` so a second teardown is a no-op.
+    async fn stop(mut self) -> (ExecMode, TeardownOutcome) {
+        // Send SIGTERM. `libc::kill` is a syscall, not I/O — safe to call
+        // from async context.
         #[cfg(unix)]
-        unsafe {
-            libc::kill(self.child.as_mut().id() as i32, libc::SIGTERM);
+        if let Some(pid) = self.child.id() {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
         }
         #[cfg(not(unix))]
         {
-            let _ = self.child.as_mut().kill();
+            let _ = self.child.start_kill();
         }
 
-        let deadline = Instant::now() + TEARDOWN_GRACE;
-        let mut outcome = TeardownOutcome::ok();
-        loop {
-            match self.child.as_mut().try_wait() {
-                Ok(Some(_)) => {
-                    self.child.disarm();
-                    return (ExecMode::Stopped(Stopped), outcome);
+        // Await exit up to the grace period. If the child exits cleanly
+        // within the window, we're done. On timeout, escalate to SIGKILL.
+        match tokio::time::timeout(TEARDOWN_GRACE, self.child.wait()).await {
+            Ok(Ok(_)) => (ExecMode::Stopped(Stopped), TeardownOutcome::ok()),
+            Ok(Err(e)) => (
+                ExecMode::Stopped(Stopped),
+                TeardownOutcome::failed(format!("wait failed: {e}")),
+            ),
+            Err(_timeout) => {
+                // SIGKILL + reap. `start_kill` is Ok if the child has
+                // already exited, so any Err here is a genuine failure.
+                let mut outcome = TeardownOutcome::ok();
+                if let Err(e) = self.child.start_kill() {
+                    outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
                 }
-                Ok(None) => {
-                    if Instant::now() >= deadline {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                Err(e) => {
-                    outcome = TeardownOutcome::failed(format!("wait failed: {e}"));
-                    break;
-                }
+                let _ = self.child.wait().await;
+                (ExecMode::Stopped(Stopped), outcome)
             }
         }
-
-        // `Child::kill` is Ok if the child has already exited, so any Err here
-        // is a genuine failure (e.g. permission denied).
-        if let Err(e) = self.child.as_mut().kill() {
-            outcome = TeardownOutcome::failed(format!("kill failed: {e}"));
-        }
-        let _ = self.child.as_mut().wait();
-        self.child.disarm();
-        (ExecMode::Stopped(Stopped), outcome)
     }
 }
 
+#[async_trait::async_trait]
 impl ActorInstance for ExecInstance {
     fn type_name(&self) -> &'static str {
         "exec"
     }
 
-    fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
+    async fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
         let (next, outcome) = match std::mem::take(&mut self.mode) {
-            ExecMode::Stopped(s) => s.execute(&self.target, &self.source_dir, cmd, args),
-            ExecMode::Running(r) => r.execute(cmd, args),
+            ExecMode::Stopped(s) => s.execute(&self.target, &self.source_dir, cmd, args).await,
+            ExecMode::Running(r) => r.execute(cmd, args).await,
         };
         self.mode = next;
         outcome
     }
 
-    fn teardown(&mut self) -> TeardownOutcome {
+    async fn teardown(&mut self) -> TeardownOutcome {
         let (next, outcome) = match std::mem::take(&mut self.mode) {
             ExecMode::Stopped(s) => (ExecMode::Stopped(s), TeardownOutcome::ok()),
-            ExecMode::Running(r) => r.stop(),
+            ExecMode::Running(r) => r.stop().await,
         };
         self.mode = next;
         outcome
@@ -279,7 +246,7 @@ fn resolve_program(program: &str, source_dir: &Path) -> PathBuf {
     if p.is_absolute() {
         return p.to_path_buf();
     }
-    // Bare name (no separator) → PATH lookup by std::process::Command.
+    // Bare name (no separator) → PATH lookup by tokio::process::Command.
     if !program.contains('/') && !program.contains('\\') {
         return PathBuf::from(program);
     }
@@ -287,7 +254,7 @@ fn resolve_program(program: &str, source_dir: &Path) -> PathBuf {
     source_dir.join(program)
 }
 
-fn apply_env(cmd: &mut StdCommand, env: &Value) -> Result<(), String> {
+fn apply_env(cmd: &mut TokioCommand, env: &Value) -> Result<(), String> {
     match env {
         Value::Record(fields) => {
             for (k, v) in fields {
@@ -345,13 +312,13 @@ mod tests {
         assert!(matches!(err, RuntimeError::MissingKwarg { .. }));
     }
 
-    #[test]
-    fn run_spawns_and_populates_pid() {
+    #[tokio::test]
+    async fn run_spawns_and_populates_pid() {
         // `sleep 60` stays alive long enough for teardown to exercise SIGTERM.
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
         assert!(matches!(inst.mode, ExecMode::Stopped(_)));
 
-        let outcome = inst.execute("run", &empty_args());
+        let outcome = inst.execute("run", &empty_args()).await;
         match outcome {
             RunOutcome::Ok(fields) => {
                 let pid = fields.get("pid").expect("pid field");
@@ -364,7 +331,7 @@ mod tests {
         }
         assert!(matches!(inst.mode, ExecMode::Running(_)));
 
-        let td = inst.teardown();
+        let td = inst.teardown().await;
         assert!(td.ok, "teardown failed: {:?}", td.message);
         assert!(matches!(inst.mode, ExecMode::Stopped(_)));
     }
@@ -384,33 +351,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn double_run_reports_already_running() {
+    #[tokio::test]
+    async fn double_run_reports_already_running() {
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        let _ = inst.execute("run", &empty_args());
-        let second = inst.execute("run", &empty_args());
+        let _ = inst.execute("run", &empty_args()).await;
+        let second = inst.execute("run", &empty_args()).await;
         assert_exec_reason(&second, "already_running");
-        let _ = inst.teardown();
+        let _ = inst.teardown().await;
     }
 
-    #[test]
-    fn nonexistent_program_reports_command_not_found() {
+    #[tokio::test]
+    async fn nonexistent_program_reports_command_not_found() {
         let mut inst =
             ExecInstance::construct(&construct_args("definitely_not_a_real_program_xyz")).unwrap();
-        let outcome = inst.execute("run", &empty_args());
+        let outcome = inst.execute("run", &empty_args()).await;
         assert_exec_reason(&outcome, "command_not_found");
         assert!(matches!(inst.mode, ExecMode::Stopped(_)));
     }
 
-    #[test]
-    fn empty_command_reports_invalid_command() {
+    #[tokio::test]
+    async fn empty_command_reports_invalid_command() {
         let mut inst = ExecInstance::construct(&construct_args("   ")).unwrap();
-        let outcome = inst.execute("run", &empty_args());
+        let outcome = inst.execute("run", &empty_args()).await;
         assert_exec_reason(&outcome, "invalid_command");
     }
 
-    #[test]
-    fn non_record_env_reports_bad_env() {
+    #[tokio::test]
+    async fn non_record_env_reports_bad_env() {
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
         let mut kw = BTreeMap::new();
         kw.insert("env".into(), Value::Number(42));
@@ -418,14 +385,14 @@ mod tests {
             positional: Vec::new(),
             keyword: kw,
         };
-        let outcome = inst.execute("run", &args);
+        let outcome = inst.execute("run", &args).await;
         assert_exec_reason(&outcome, "bad_env");
         assert!(matches!(inst.mode, ExecMode::Stopped(_)));
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn non_executable_file_reports_permission_denied() {
+    async fn non_executable_file_reports_permission_denied() {
         // Create a non-executable regular file and point the actor at it.
         // `execve` on a non-executable file returns EACCES, which io::Error
         // surfaces as `PermissionDenied`.
@@ -452,58 +419,116 @@ mod tests {
             source_dir: dir.clone(),
         };
         let mut inst = ExecInstance::construct(&args).unwrap();
-        let outcome = inst.execute("run", &empty_args());
+        let outcome = inst.execute("run", &empty_args()).await;
         assert_exec_reason(&outcome, "permission_denied");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn kill_on_drop_reaps_child() {
-        // Spawn a long sleeper directly, drop the wrapper, and verify the
-        // kernel no longer knows about the pid.
-        let child = StdCommand::new("sleep").arg("60").spawn().unwrap();
-        let pid = child.id() as i32;
-        let guard = KillOnDrop::new(child);
-        drop(guard);
-        // KillOnDrop::drop calls wait(), so the process is reaped before drop
-        // returns. `kill(pid, 0)` probes existence without delivering a signal.
-        let res = unsafe { libc::kill(pid, 0) };
-        assert_eq!(res, -1, "process still exists after KillOnDrop::drop");
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
+    async fn dropped_running_instance_reaps_child() {
+        // Spawn via the normal `run` path, then drop the instance without
+        // calling `teardown`. Tokio's `.kill_on_drop(true)` on the Command
+        // should still SIGKILL + reap the child via the runtime's reaper.
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        let pid = match outcome {
+            RunOutcome::Ok(fields) => match fields.get("pid") {
+                Some(Value::Number(n)) => *n as i32,
+                _ => panic!("expected numeric pid"),
+            },
+            RunOutcome::Error { variant, fields } => {
+                panic!("expected Ok, got Error: variant={variant}, fields={fields:?}")
+            }
+            RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
+        };
+
+        drop(inst);
+        wait_for_esrch(pid).await;
     }
 
-    #[test]
-    fn teardown_when_stopped_is_noop() {
+    /// Common helper: poll `kill(pid, 0)` up to 2s waiting for ESRCH, the
+    /// signal that the kernel no longer knows about the pid (child was
+    /// SIGKILLed and reaped).
+    #[cfg(unix)]
+    async fn wait_for_esrch(pid: i32) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let res = unsafe { libc::kill(pid, 0) };
+            if res == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("process {pid} still exists after deadline");
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn panic_during_test_body_reaps_child() {
+        // Simulate a mid-test panic: construct, run, then unwind the scope
+        // that owns the instance. The panic triggers drop on `inst` during
+        // unwind, which must still SIGKILL the child via kill_on_drop. This
+        // is the panic path `InstantiatedActors::Drop` used to cover before
+        // we removed it in favor of each actor's own panic-safe Drop.
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        let td = inst.teardown();
+        let outcome = inst.execute("run", &empty_args()).await;
+        let pid = match outcome {
+            RunOutcome::Ok(fields) => match fields.get("pid") {
+                Some(Value::Number(n)) => *n as i32,
+                _ => panic!("expected numeric pid"),
+            },
+            RunOutcome::Error { variant, fields } => {
+                panic!("expected Ok, got Error: variant={variant}, fields={fields:?}")
+            }
+            RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
+        };
+
+        // Move `inst` into a closure that panics. `catch_unwind` traps the
+        // panic so the test itself keeps running; during the unwind, `inst`
+        // drops and Child's `kill_on_drop` fires.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _inst = inst;
+            panic!("simulated mid-test panic");
+        }));
+        assert!(
+            result.is_err(),
+            "expected panic to propagate via catch_unwind"
+        );
+
+        wait_for_esrch(pid).await;
+    }
+
+    #[tokio::test]
+    async fn teardown_when_stopped_is_noop() {
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
+        let td = inst.teardown().await;
         assert!(td.ok);
         // Second teardown is still a no-op.
-        let td = inst.teardown();
+        let td = inst.teardown().await;
         assert!(td.ok);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn teardown_sigkills_sigterm_ignoring_child() {
+    async fn teardown_sigkills_sigterm_ignoring_child() {
         // bash traps TERM and sleeps; teardown must escalate to SIGKILL after
         // TEARDOWN_GRACE (2s) and still report ok.
         let mut inst =
             ExecInstance::construct(&construct_args("bash -c 'trap \"\" TERM; sleep 60'")).unwrap();
-        let outcome = inst.execute("run", &empty_args());
+        let outcome = inst.execute("run", &empty_args()).await;
         assert!(matches!(outcome, RunOutcome::Ok(_)));
 
         // Give bash time to install the trap before we send SIGTERM, otherwise
         // the signal races with bash's startup and the test measures the wrong
         // path.
-        std::thread::sleep(Duration::from_millis(300));
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         let start = std::time::Instant::now();
-        let td = inst.teardown();
+        let td = inst.teardown().await;
         let elapsed = start.elapsed();
 
         assert!(td.ok, "teardown failed: {:?}", td.message);
