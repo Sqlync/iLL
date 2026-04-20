@@ -15,6 +15,22 @@ Here is what it looks like:
 
 iLL is inspired by the [actor model](https://en.wikipedia.org/wiki/Actor_model), [sqllogictest](https://sqlite.org/sqllogictest/doc/trunk/about.wiki), [Rust](https://rust-lang.org/), and [MuonTrap](https://github.com/fhunleth/muontrap). It was created for the development and testing of [SQLync](https://www.sqlync.com).
 
+## Supported Actors and Systems
+
+Each `.ill` file is a single test. The following "actors" are currently targeted:
+
+| Actor | Description | Examples | Implemented |
+| --- | --- | --- | --- |
+| exec | Shell Command | [examples/exec/](examples/exec/) | [x] |
+| pg_client | Postgres Client | [examples/pg_client/](examples/pg_client/) | [ ] |
+| rest | REST client | [examples/rest/](examples/rest/) | [ ] |
+| mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | [ ] |
+| container | Docker Container | [examples/container/](examples/container/) | [ ] |
+| args | Commandline Arguments | [examples/built-in/args.ill](examples/built-in/args.ill) | [ ] |
+
+
+Some language specific dockerfile examples are available at [examples/container/languages/](examples/container/languages/) or you could just run with the exec actor. More concrete examples to come on this.
+
 ## Actors
 
 Interactions in iLL are performed by actors. Actors have their own contained state expressed with member variables and the actor's mode. 
@@ -37,17 +53,6 @@ ill check [paths...]  Validate .ill files without running them
 Both commands accept any mix of files and directories. Directories are searched recursively for `.ill` files. With no arguments, the current directory is searched.
 
 `ill check` reports all diagnostics (errors, warnings, hints) and exits non-zero if there are any errors. It's useful for CI linting or editor integration before a full test run.
-
-## Examples
-
-Each `.ill` file is a single test. The following systems are currently targeted and have examples:
-
-- [Postgres](examples/postgres/)
-- [REST](examples/rest/)
-- [MQTT](examples/mqtt/)
-- [Containers](examples/container/)
-- [Built-in language features](examples/built-in/)
-- [Language specific dockerfiles](examples/container/languages/)
 
 ## Comparison with existing systems
 
