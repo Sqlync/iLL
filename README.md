@@ -3,7 +3,9 @@
 Having testing troubles? It's time to get iLL!
 
 * [Roadmap](design/ROADMAP.md)
+* [Supported Actors and Systems](#supported-actors-and-systems)
 * [Comparison with existing systems](#comparison-with-existing-systems)
+* [Concepts](#concepts)
 * [FAQ](#faq)
 
 ## What is iLL?
@@ -31,18 +33,6 @@ Each `.ill` file is a single test. The following "actors" are currently targeted
 
 Some language specific dockerfile examples are available at [examples/container/languages/](examples/container/languages/) or you could just run with the exec actor. More concrete examples to come on this.
 
-## Actors
-
-Interactions in iLL are performed by actors. Actors have their own contained state expressed with member variables and the actor's mode. 
-
-### Member Variables
-
-Actors have member variables, much like classes or structs in other languages. The member variables can have different visibility and mutability depending on annotations in their actor definitions.
-
-### Modes
-
-Different actor types (ex: postgres client, bash, mqtt, etc.) offer different actions depending on what "mode" they are in. For example, a postgres client may be in a "disconnected" mode and unable to run queries until it connects to a postgres server, at which point it will be in a "connected" mode and able to run queries. The iLL compiler is aware of this transition and can provide useful functionality like catching errors at compile time and providing hints to IDEs.
-
 ## Usage
 
 ```
@@ -62,6 +52,19 @@ Sqllogictest is the standard for SQL correctness testing. Its documentation stat
 
 iLL extends sqllogictest's statement-assertion model into full bring-up, test, and teardown for systems beyond SQL.
 
+## Concepts
+
+### Actors
+
+Interactions in iLL are performed by actors. Actors have their own contained state expressed with member variables and the actor's mode. 
+
+### Member Variables
+
+Actors have member variables, much like classes or structs in other languages. The member variables can have different visibility and mutability depending on annotations in their actor definitions.
+
+### Modes
+
+Different actor types (ex: postgres client, bash, mqtt, etc.) offer different actions depending on what "mode" they are in. For example, a postgres client may be in a "disconnected" mode and unable to run queries until it connects to a postgres server, at which point it will be in a "connected" mode and able to run queries. The iLL compiler is aware of this transition and can provide useful functionality like catching errors at compile time and providing hints to IDEs.
 
 ## FAQ
 
