@@ -41,11 +41,12 @@ enum Commands {
     },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { paths } => run_test(&paths),
+        Commands::Test { paths } => run_test(&paths).await,
         Commands::Check { paths } => run_check(&paths),
     }
 }
@@ -71,7 +72,7 @@ fn resolve_files(paths: &[PathBuf]) -> Vec<PathBuf> {
     all
 }
 
-fn run_test(paths: &[PathBuf]) {
+async fn run_test(paths: &[PathBuf]) {
     let files = resolve_files(paths);
 
     if files.is_empty() {
@@ -92,7 +93,7 @@ fn run_test(paths: &[PathBuf]) {
             }
         };
 
-        let report = ill_core::runtime::harness::run_test_file(path, &src);
+        let report = ill_core::runtime::harness::run_test_file(path, &src).await;
         if report.passed {
             println!("PASS {}", path.display());
             passed += 1;

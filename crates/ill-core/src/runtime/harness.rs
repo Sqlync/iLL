@@ -23,7 +23,7 @@ use super::report::{StatementReport, TeardownReport, TestReport};
 use super::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value};
 
 /// Run a single .ill test file and return a structured report.
-pub fn run_test_file(path: &Path, src: &str) -> TestReport {
+pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
     let source_dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -57,10 +57,10 @@ pub fn run_test_file(path: &Path, src: &str) -> TestReport {
         };
     }
 
-    execute(path, &ast, &source_dir)
+    execute(path, &ast, &source_dir).await
 }
 
-fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
+async fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     let registry = Registry::global();
     let mut statements: Vec<StatementReport> = Vec::new();
     let mut actors = InstantiatedActors::new();
@@ -83,7 +83,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
                 }
             },
             TopLevel::AsBlock(block) => {
-                if let Err(stmt) = run_as_block(block, &mut actors) {
+                if let Err(stmt) = run_as_block(block, &mut actors).await {
                     statements.push(stmt);
                     break;
                 }
@@ -92,7 +92,7 @@ fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     }
 
     let passed = statements.is_empty();
-    let teardown = actors.teardown_all();
+    let teardown = actors.teardown_all().await;
     TestReport {
         path: path.to_path_buf(),
         passed,
@@ -122,7 +122,10 @@ fn construct_actor(
 
 /// Walk an `as` block. `Err` signals that a failure was recorded and the test
 /// should stop (the caller still runs teardown).
-fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), StatementReport> {
+async fn run_as_block(
+    block: &AsBlock,
+    actors: &mut InstantiatedActors,
+) -> Result<(), StatementReport> {
     let registry = Registry::global();
     let actor_name = &block.actor.name;
 
@@ -179,7 +182,7 @@ fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), 
                             message: format!("actor `{actor_name}` has no live instance"),
                         })?;
 
-                match instance.execute(cmd_def.name(), &args) {
+                match instance.execute(cmd_def.name(), &args).await {
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
                     }
@@ -353,8 +356,9 @@ fn block_has_error_ref_after(block: &AsBlock, after: usize) -> bool {
 // ── Live actor instances ─────────────────────────────────────────────────────
 //
 // Holds instances in construction order. `teardown_all` tears down in
-// reverse. `Drop` is the last-resort safety net for panics — in the normal
-// path `teardown_all` is called explicitly so results can be recorded.
+// reverse. Each actor is responsible for its own panic-safe cleanup via its
+// own `Drop` impl (e.g. exec's `KillOnDrop`); there is no `Drop` on this
+// container because `teardown` is async and `Drop` can't await.
 
 struct InstantiatedActors {
     /// (actor name, instance). Ordered by construction.
@@ -388,12 +392,19 @@ impl InstantiatedActors {
         None
     }
 
-    fn teardown_all(&mut self) -> Vec<TeardownReport> {
+    async fn teardown_all(&mut self) -> Vec<TeardownReport> {
         let mut reports = Vec::with_capacity(self.entries.len());
         while let Some((name, mut inst)) = self.entries.pop() {
-            let outcome =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inst.teardown()))
-                    .unwrap_or_else(|_| TeardownOutcome::failed("teardown panicked"));
+            // Run each teardown on a spawned task so a panic in one actor's
+            // teardown reports as a failure for that actor instead of
+            // aborting the whole teardown walk. `JoinError::is_panic`
+            // surfaces the panic; we map it to the same "teardown panicked"
+            // message the sync version used.
+            let outcome = match tokio::spawn(async move { inst.teardown().await }).await {
+                Ok(o) => o,
+                Err(e) if e.is_panic() => TeardownOutcome::failed("teardown panicked"),
+                Err(_) => TeardownOutcome::failed("teardown cancelled"),
+            };
             reports.push(TeardownReport {
                 actor: name,
                 outcome,
@@ -404,24 +415,13 @@ impl InstantiatedActors {
     }
 }
 
-impl Drop for InstantiatedActors {
-    fn drop(&mut self) {
-        // If teardown_all already ran, entries is empty. This only fires
-        // on panic.
-        if self.entries.is_empty() {
-            return;
-        }
-        let _ = self.teardown_all();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_failure_reports_fail() {
-        let report = run_test_file(Path::new("bogus.ill"), "actor !!!!");
+    #[tokio::test]
+    async fn parse_failure_reports_fail() {
+        let report = run_test_file(Path::new("bogus.ill"), "actor !!!!").await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -429,9 +429,9 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn validation_failure_reports_fail() {
-        let report = run_test_file(Path::new("bogus.ill"), "actor bob = nope_actor\n");
+    #[tokio::test]
+    async fn validation_failure_reports_fail() {
+        let report = run_test_file(Path::new("bogus.ill"), "actor bob = nope_actor\n").await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -439,8 +439,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn exec_basic_construct_and_teardown() {
+    #[tokio::test]
+    async fn exec_basic_construct_and_teardown() {
         // Uses `sleep 60` so the process has time to be observed and torn down.
         let src = "\
 actor server = exec,
@@ -449,14 +449,14 @@ actor server = exec,
 as server:
   run
 ";
-        let report = run_test_file(Path::new("t.ill"), src);
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(report.passed, "statements: {}", report.statements.len());
         assert_eq!(report.teardown.len(), 1);
         assert!(report.teardown[0].outcome.ok);
     }
 
-    #[test]
-    fn assert_failure_is_recorded() {
+    #[tokio::test]
+    async fn assert_failure_is_recorded() {
         // Hand-roll an assertion that must fail: `assert 1 == 2`.
         // We need an actor declaration for the `as` block to be valid.
         let src = "\
@@ -467,7 +467,7 @@ as server:
   run
   assert 1 == 2
 ";
-        let report = run_test_file(Path::new("t.ill"), src);
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -477,8 +477,8 @@ as server:
         assert_eq!(report.teardown.len(), 1);
     }
 
-    #[test]
-    fn unknown_program_is_command_failure() {
+    #[tokio::test]
+    async fn unknown_program_is_command_failure() {
         let src = "\
 actor server = exec,
   command: \"definitely_not_a_real_program_xyz\"
@@ -486,7 +486,7 @@ actor server = exec,
 as server:
   run
 ";
-        let report = run_test_file(Path::new("t.ill"), src);
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -494,8 +494,8 @@ as server:
         ));
     }
 
-    #[test]
-    fn expected_command_not_found_passes_via_error_branch() {
+    #[tokio::test]
+    async fn expected_command_not_found_passes_via_error_branch() {
         // Mirrors examples/exec/failing.ill: a run that fails to spawn is
         // committed to the error branch by the `error.exec.reason` assert, so
         // the test passes.
@@ -507,7 +507,7 @@ as never_runs:
   run
   assert error.exec.reason == :command_not_found
 ";
-        let report = run_test_file(Path::new("t.ill"), src);
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(
             report.passed,
             "expected pass, got {} statement(s)",
@@ -516,8 +516,8 @@ as never_runs:
         assert_eq!(report.teardown.len(), 1);
     }
 
-    #[test]
-    fn wrong_reason_assert_fails() {
+    #[tokio::test]
+    async fn wrong_reason_assert_fails() {
         // Same setup, but assert on the wrong reason — must record an
         // AssertFailure, not a CommandFailure.
         let src = "\
@@ -528,7 +528,7 @@ as never_runs:
   run
   assert error.exec.reason == :permission_denied
 ";
-        let report = run_test_file(Path::new("t.ill"), src);
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
