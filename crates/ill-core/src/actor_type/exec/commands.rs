@@ -19,10 +19,10 @@ define_outcome! {
     }
 }
 
-static EXEC_ERROR_TYPE: ErrorTypeDef = ErrorTypeDef {
+static EXEC_ERROR_TYPES: &[ErrorTypeDef] = &[ErrorTypeDef {
     name: "exec",
     fields: ExecError::FIELDS,
-};
+}];
 
 pub struct Run;
 
@@ -54,7 +54,7 @@ impl Command for Run {
     }
 
     fn error_types(&self) -> &'static [ErrorTypeDef] {
-        std::slice::from_ref(&EXEC_ERROR_TYPE)
+        EXEC_ERROR_TYPES
     }
 }
 

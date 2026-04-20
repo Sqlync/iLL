@@ -411,7 +411,6 @@ mod tests {
 
     #[test]
     fn empty_command_reports_invalid_command() {
-        // shlex parses this to an empty token list → invalid.
         let mut inst = ExecInstance::construct(&construct_args("   ")).unwrap();
         let outcome = inst.execute("run", &empty_args());
         assert_exec_reason(&outcome, "invalid_command");
@@ -451,7 +450,6 @@ mod tests {
         let path = dir.join("not_executable");
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "#!/bin/sh\necho hi").unwrap();
-        // Deliberately leave mode without +x.
 
         let target = path.to_str().unwrap().to_string();
         let mut kw = BTreeMap::new();

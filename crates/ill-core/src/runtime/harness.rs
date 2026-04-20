@@ -192,10 +192,10 @@ fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), 
                         // reference `error.*`, which commits the command to the
                         // error branch (matching validator semantics).
                         let was_expected = block_has_error_ref_after(block, idx);
-                        let error_record = build_error_record(variant, &message, fields.clone());
-                        scope.bind("error", Value::Record(error_record.clone()));
+                        let error_record = build_error_record(variant, &message, fields);
                         if !was_expected {
                             let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
+                            scope.bind("error", Value::Record(error_record.clone()));
                             return Err(StatementReport::CommandFailure {
                                 actor: actor_name.clone(),
                                 command: cmd.name.name.clone(),
@@ -204,6 +204,7 @@ fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), 
                                 expect,
                             });
                         }
+                        scope.bind("error", Value::Record(error_record));
                     }
                     RunOutcome::NotImplemented { actor, cmd: c } => {
                         return Err(StatementReport::CommandNotImplemented {
