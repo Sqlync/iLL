@@ -9,6 +9,26 @@ define_outcome! {
     }
 }
 
+define_outcome! {
+    /// exec-specific error details. Nested under `error.exec.*`.
+    ///
+    /// `reason` is one of the atoms documented in
+    /// [`super::runtime::RunErrorReason`].
+    pub ExecErrorDetails {
+        reason: Atom,
+    }
+}
+
+define_outcome! {
+    /// Error shape for `exec.run`. Extends the standard `code`/`message` pair
+    /// with a nested `exec` namespace for actor-specific classification.
+    pub RunError {
+        code: Number,
+        message: String,
+        exec: Record(ExecErrorDetails),
+    }
+}
+
 pub struct Run;
 
 impl Command for Run {
@@ -36,6 +56,10 @@ impl Command for Run {
 
     fn ok_fields(&self) -> &'static [OutcomeField] {
         RunOk::FIELDS
+    }
+
+    fn error_fields(&self) -> &'static [OutcomeField] {
+        RunError::FIELDS
     }
 }
 

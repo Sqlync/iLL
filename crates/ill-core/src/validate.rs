@@ -377,24 +377,11 @@ impl<'r> Validator<'r> {
         outcome: CommandOutcome,
     ) -> ValueType {
         match expr {
-            Expr::MemberAccess {
-                object, property, ..
-            } => {
-                // Resolve `ok.<field>` and `error.<field>` against the last
-                // command's declared outcome fields.
-                if let Expr::Ident(ident) = object.as_ref() {
-                    let fields = match ident.name.as_str() {
-                        "ok" => last_ok_fields,
-                        "error" => last_error_fields,
-                        _ => &[],
-                    };
-                    if !fields.is_empty() {
-                        return fields
-                            .iter()
-                            .find(|f| f.name == property.name)
-                            .map(|f| f.ty)
-                            .unwrap_or(ValueType::Unknown);
-                    }
+            Expr::MemberAccess { .. } => {
+                if let Some((ty, _)) =
+                    resolve_outcome_chain(expr, last_ok_fields, last_error_fields)
+                {
+                    return ty;
                 }
                 ValueType::Unknown
             }
@@ -411,6 +398,34 @@ impl<'r> Validator<'r> {
             }
             _ => expr_type(expr),
         }
+    }
+}
+
+/// Walk a chain of `MemberAccess` rooted at `ok` or `error` and resolve it
+/// against the last command's declared outcome fields. Returns the terminal
+/// field's type and its nested `fields` slice (empty for leaves). Returns
+/// `None` if the chain doesn't root at `ok`/`error` or any step doesn't
+/// resolve in the declared schema.
+fn resolve_outcome_chain(
+    expr: &Expr,
+    last_ok_fields: &'static [OutcomeField],
+    last_error_fields: &'static [OutcomeField],
+) -> Option<(ValueType, &'static [OutcomeField])> {
+    match expr {
+        Expr::Ident(ident) => match ident.name.as_str() {
+            "ok" => Some((ValueType::Record, last_ok_fields)),
+            "error" => Some((ValueType::Record, last_error_fields)),
+            _ => None,
+        },
+        Expr::MemberAccess {
+            object, property, ..
+        } => {
+            let (_ty, parent_fields) =
+                resolve_outcome_chain(object, last_ok_fields, last_error_fields)?;
+            let f = parent_fields.iter().find(|f| f.name == property.name)?;
+            Some((f.ty, f.fields))
+        }
+        _ => None,
     }
 }
 

@@ -58,6 +58,9 @@ pub enum ValueType {
     Bool,
     Atom,
     Bytes,
+    /// A nested record whose schema is statically known via
+    /// `OutcomeField::fields` on the enclosing descriptor.
+    Record,
     /// A structured runtime value produced by parsing (json, protobuf, etc.).
     /// The shape is not statically known to the validator.
     Dynamic,
@@ -88,6 +91,9 @@ pub struct KeywordArgDef {
 pub struct OutcomeField {
     pub name: &'static str,
     pub ty: ValueType,
+    /// Nested schema when `ty == ValueType::Record`. Empty for leaf types.
+    /// Reference lets us build nested outcome descriptors without heap allocation.
+    pub fields: &'static [OutcomeField],
 }
 
 // ── Commands ───────────────────────────────────────────────────────────────────

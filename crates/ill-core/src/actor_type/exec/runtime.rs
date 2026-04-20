@@ -7,15 +7,46 @@
 // from the runner; a bounded-buffer capture mechanism is tracked in
 // DEFERRED.md.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
 use std::time::{Duration, Instant};
 
-use super::commands::RunOk;
+use super::commands::{ExecErrorDetails, RunError, RunOk};
 use crate::actor_type::ActorInstance;
 use crate::runtime::{
     CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value,
 };
+
+/// Reason atoms surfaced on `error.exec.reason` for `run` failures. Kept as
+/// string literals so the macro-generated outcome type stays plain.
+const REASON_INVALID_COMMAND: &str = "invalid_command";
+const REASON_COMMAND_NOT_FOUND: &str = "command_not_found";
+const REASON_PERMISSION_DENIED: &str = "permission_denied";
+const REASON_SPAWN_FAILED: &str = "spawn_failed";
+const REASON_BAD_ENV: &str = "bad_env";
+const REASON_ALREADY_RUNNING: &str = "already_running";
+
+fn run_error(reason: &str, message: impl Into<String>) -> RunOutcome {
+    RunOutcome::Error(
+        RunError {
+            code: 1,
+            message: message.into(),
+            exec: ExecErrorDetails {
+                reason: reason.into(),
+            },
+        }
+        .into_record(),
+    )
+}
+
+fn classify_spawn_error(e: &io::Error) -> &'static str {
+    match e.kind() {
+        io::ErrorKind::NotFound => REASON_COMMAND_NOT_FOUND,
+        io::ErrorKind::PermissionDenied => REASON_PERMISSION_DENIED,
+        _ => REASON_SPAWN_FAILED,
+    }
+}
 
 /// Time between SIGTERM and SIGKILL during teardown.
 const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -129,7 +160,10 @@ impl Stopped {
             Some(p) if !p.is_empty() => p,
             _ => {
                 let msg = format!("invalid command: {target:?}");
-                return (ExecMode::Stopped(self), RunOutcome::error(1, msg));
+                return (
+                    ExecMode::Stopped(self),
+                    run_error(REASON_INVALID_COMMAND, msg),
+                );
             }
         };
 
@@ -141,15 +175,16 @@ impl Stopped {
 
         if let Some(env_val) = env {
             if let Err(e) = apply_env(&mut cmd, env_val) {
-                return (ExecMode::Stopped(self), RunOutcome::error(1, e));
+                return (ExecMode::Stopped(self), run_error(REASON_BAD_ENV, e));
             }
         }
 
         let child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
+                let reason = classify_spawn_error(&e);
                 let msg = format!("spawn failed: {e}");
-                return (ExecMode::Stopped(self), RunOutcome::error(1, msg));
+                return (ExecMode::Stopped(self), run_error(reason, msg));
             }
         };
 
@@ -168,7 +203,7 @@ impl Running {
         match cmd {
             "run" => (
                 ExecMode::Running(self),
-                RunOutcome::error(1, "exec process already running"),
+                run_error(REASON_ALREADY_RUNNING, "exec process already running"),
             ),
             other => (
                 ExecMode::Running(self),
@@ -343,13 +378,96 @@ mod tests {
         assert!(matches!(inst.mode, ExecMode::Stopped(_)));
     }
 
+    fn assert_exec_reason(outcome: &RunOutcome, expected: &str) {
+        let fields = match outcome {
+            RunOutcome::Error(f) => f,
+            RunOutcome::Ok(_) => panic!("expected Error, got Ok"),
+            RunOutcome::NotImplemented { .. } => panic!("expected Error, got NotImplemented"),
+        };
+        let exec = match fields.get("exec") {
+            Some(Value::Record(r)) => r,
+            other => panic!("expected error.exec record, got {other:?}"),
+        };
+        match exec.get("reason") {
+            Some(Value::Atom(a)) => assert_eq!(a, expected, "error.exec.reason mismatch"),
+            other => panic!("expected error.exec.reason atom, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn double_run_returns_error() {
+    fn double_run_reports_already_running() {
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
         let _ = inst.execute("run", &empty_args());
         let second = inst.execute("run", &empty_args());
-        assert!(matches!(second, RunOutcome::Error(_)));
+        assert_exec_reason(&second, "already_running");
         let _ = inst.teardown();
+    }
+
+    #[test]
+    fn nonexistent_program_reports_command_not_found() {
+        let mut inst =
+            ExecInstance::construct(&construct_args("definitely_not_a_real_program_xyz")).unwrap();
+        let outcome = inst.execute("run", &empty_args());
+        assert_exec_reason(&outcome, "command_not_found");
+        assert!(matches!(inst.mode, ExecMode::Stopped(_)));
+    }
+
+    #[test]
+    fn empty_command_reports_invalid_command() {
+        // shlex parses this to an empty token list → invalid.
+        let mut inst = ExecInstance::construct(&construct_args("   ")).unwrap();
+        let outcome = inst.execute("run", &empty_args());
+        assert_exec_reason(&outcome, "invalid_command");
+    }
+
+    #[test]
+    fn non_record_env_reports_bad_env() {
+        let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
+        let mut kw = BTreeMap::new();
+        kw.insert("env".into(), Value::Number(42));
+        let args = CommandArgs {
+            positional: Vec::new(),
+            keyword: kw,
+        };
+        let outcome = inst.execute("run", &args);
+        assert_exec_reason(&outcome, "bad_env");
+        assert!(matches!(inst.mode, ExecMode::Stopped(_)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn non_executable_file_reports_permission_denied() {
+        // Create a non-executable regular file and point the actor at it.
+        // `execve` on a non-executable file returns EACCES, which io::Error
+        // surfaces as `PermissionDenied`.
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!(
+            "ill-exec-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("not_executable");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "#!/bin/sh\necho hi").unwrap();
+        // Deliberately leave mode without +x.
+
+        let target = path.to_str().unwrap().to_string();
+        let mut kw = BTreeMap::new();
+        kw.insert("command".into(), Value::String(target));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: dir.clone(),
+        };
+        let mut inst = ExecInstance::construct(&args).unwrap();
+        let outcome = inst.execute("run", &empty_args());
+        assert_exec_reason(&outcome, "permission_denied");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

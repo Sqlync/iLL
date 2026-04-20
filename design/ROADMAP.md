@@ -42,7 +42,7 @@ End-to-end vertical slice with the simplest actor: run a command on the host, ca
 ## Phase 6: Implement the rest of the Actors
 In any order
 
-- [ ] Handle intentionally failing exec actor
+- [x] Handle intentionally failing exec actor
 - [ ] Built-in actors (assert, env, etc.)
 - [ ] Container (image/dockerfile, run, lifecycle, shell)
 - [ ] Postgres (start/stop, client, queries)

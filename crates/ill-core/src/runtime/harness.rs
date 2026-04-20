@@ -477,4 +477,46 @@ as server:
             Some(StatementReport::CommandFailure { .. })
         ));
     }
+
+    #[test]
+    fn expected_command_not_found_passes_via_error_branch() {
+        // Mirrors examples/exec/failing.ill: a run that fails to spawn is
+        // committed to the error branch by the `error.exec.reason` assert, so
+        // the test passes.
+        let src = "\
+actor never_runs = exec,
+  command: \"definitely_not_a_real_program_xyz\"
+
+as never_runs:
+  run
+  assert error.exec.reason == :command_not_found
+";
+        let report = run_test_file(Path::new("t.ill"), src);
+        assert!(
+            report.passed,
+            "expected pass, got {} statement(s)",
+            report.statements.len()
+        );
+        assert_eq!(report.teardown.len(), 1);
+    }
+
+    #[test]
+    fn wrong_reason_assert_fails() {
+        // Same setup, but assert on the wrong reason — must record an
+        // AssertFailure, not a CommandFailure.
+        let src = "\
+actor never_runs = exec,
+  command: \"definitely_not_a_real_program_xyz\"
+
+as never_runs:
+  run
+  assert error.exec.reason == :permission_denied
+";
+        let report = run_test_file(Path::new("t.ill"), src);
+        assert!(!report.passed);
+        assert!(matches!(
+            report.statements.first(),
+            Some(StatementReport::AssertFailure { .. })
+        ));
+    }
 }
