@@ -183,22 +183,24 @@ fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), 
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
                     }
-                    RunOutcome::Error(fields) => {
+                    RunOutcome::Error { variant, fields } => {
                         // An Error is a failure unless the following statements
                         // reference `error.*`, which commits the command to the
                         // error branch (matching validator semantics).
                         let was_expected = block_has_error_ref_after(block, idx);
-                        scope.bind("error", Value::Record(fields.clone()));
+                        let error_record = build_error_record(variant, fields);
                         if !was_expected {
                             let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
+                            scope.bind("error", Value::Record(error_record.clone()));
                             return Err(StatementReport::CommandFailure {
                                 actor: actor_name.clone(),
                                 command: cmd.name.name.clone(),
                                 span: cmd.span,
-                                error_fields: fields,
+                                error_fields: error_record,
                                 expect,
                             });
                         }
+                        scope.bind("error", Value::Record(error_record));
                     }
                     RunOutcome::NotImplemented { actor, cmd: c } => {
                         return Err(StatementReport::CommandNotImplemented {
@@ -304,6 +306,20 @@ fn eval_keyword_args(
         out.insert(kw.key.name.clone(), v);
     }
     Ok(out)
+}
+
+/// Assemble the scope-visible `error` record from a `RunOutcome::Error`.
+/// Every error exposes `type` (atom naming the variant) and `message` so
+/// tests can report on an unexpected variant without knowing its schema.
+/// Variant-specific fields live under `error.<variant>`.
+fn build_error_record(
+    variant: &'static str,
+    fields: BTreeMap<String, Value>,
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    out.insert("type".into(), Value::Atom(variant.into()));
+    out.insert(variant.into(), Value::Record(fields));
+    out
 }
 
 /// Check whether any statement after index `after` in the block references
@@ -475,6 +491,48 @@ as server:
         assert!(matches!(
             report.statements.first(),
             Some(StatementReport::CommandFailure { .. })
+        ));
+    }
+
+    #[test]
+    fn expected_command_not_found_passes_via_error_branch() {
+        // Mirrors examples/exec/failing.ill: a run that fails to spawn is
+        // committed to the error branch by the `error.exec.reason` assert, so
+        // the test passes.
+        let src = "\
+actor never_runs = exec,
+  command: \"definitely_not_a_real_program_xyz\"
+
+as never_runs:
+  run
+  assert error.exec.reason == :command_not_found
+";
+        let report = run_test_file(Path::new("t.ill"), src);
+        assert!(
+            report.passed,
+            "expected pass, got {} statement(s)",
+            report.statements.len()
+        );
+        assert_eq!(report.teardown.len(), 1);
+    }
+
+    #[test]
+    fn wrong_reason_assert_fails() {
+        // Same setup, but assert on the wrong reason — must record an
+        // AssertFailure, not a CommandFailure.
+        let src = "\
+actor never_runs = exec,
+  command: \"definitely_not_a_real_program_xyz\"
+
+as never_runs:
+  run
+  assert error.exec.reason == :permission_denied
+";
+        let report = run_test_file(Path::new("t.ill"), src);
+        assert!(!report.passed);
+        assert!(matches!(
+            report.statements.first(),
+            Some(StatementReport::AssertFailure { .. })
         ));
     }
 }

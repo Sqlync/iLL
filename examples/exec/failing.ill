@@ -1,0 +1,11 @@
+# failing exec example
+#
+# demonstrates a command that we expect to fail to start.
+
+actor never_runs = exec,
+  command: "definitely_not_a_real_program_xyz"
+
+as never_runs:
+  run
+  assert error.type == :exec
+  assert error.exec.reason == :command_not_found

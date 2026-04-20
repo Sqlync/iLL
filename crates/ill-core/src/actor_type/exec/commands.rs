@@ -1,5 +1,5 @@
 use super::modes::{RUNNING, STOPPED};
-use crate::actor_type::{Command, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::actor_type::{Command, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
 use crate::define_outcome;
 
 define_outcome! {
@@ -8,6 +8,21 @@ define_outcome! {
         pid: Number,
     }
 }
+
+define_outcome! {
+    /// Fields on `error.exec.*` when `exec.run` fails. `reason` is one of
+    /// the atoms classified in `super::runtime`: `:invalid_command`,
+    /// `:command_not_found`, `:permission_denied`, `:spawn_failed`,
+    /// `:bad_env`, `:already_running`.
+    pub ExecError {
+        reason: Atom,
+    }
+}
+
+static EXEC_ERROR_TYPES: &[ErrorTypeDef] = &[ErrorTypeDef {
+    name: "exec",
+    fields: ExecError::FIELDS,
+}];
 
 pub struct Run;
 
@@ -36,6 +51,10 @@ impl Command for Run {
 
     fn ok_fields(&self) -> &'static [OutcomeField] {
         RunOk::FIELDS
+    }
+
+    fn error_types(&self) -> &'static [ErrorTypeDef] {
+        EXEC_ERROR_TYPES
     }
 }
 
