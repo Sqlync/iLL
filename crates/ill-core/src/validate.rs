@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use crate::actor_type::{ActorType, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
 use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
@@ -137,9 +137,9 @@ impl<'r> Validator<'r> {
             return;
         }
 
-        // Fields available on `ok.*` / `error.*` for the last command.
+        // Schemas for `ok.*` / `error.*` after the last command.
         let mut last_ok_fields: &'static [OutcomeField] = &[];
-        let mut last_error_fields: &'static [OutcomeField] = &[];
+        let mut last_error_types: &'static [ErrorTypeDef] = &[];
 
         // Outcome state for the current command window. Reset on each command;
         // updated as ok/error asserts are encountered. Used to determine whether
@@ -165,10 +165,10 @@ impl<'r> Validator<'r> {
                     }
                     outcome = CommandOutcome::ImpliedOk;
 
-                    let (ok_fields, error_fields, transition) =
+                    let (ok_fields, error_types, transition) =
                         self.check_command(&block.actor.name, cmd);
                     last_ok_fields = ok_fields;
-                    last_error_fields = error_fields;
+                    last_error_types = error_types;
                     pending_transition = transition;
                 }
                 Statement::Let(let_stmt) => {
@@ -195,7 +195,7 @@ impl<'r> Validator<'r> {
                                 &block.actor.name,
                                 expr,
                                 last_ok_fields,
-                                last_error_fields,
+                                last_error_types,
                                 outcome,
                             )
                         }
@@ -238,7 +238,7 @@ impl<'r> Validator<'r> {
 
     // ── Commands ──────────────────────────────────────────────────────────────
 
-    /// Returns `(ok_fields, error_fields, pending_transition)` for the command.
+    /// Returns `(ok_fields, error_types, pending_transition)` for the command.
     /// The transition is returned rather than applied so the caller can defer
     /// it until the command's outcome is known from following asserts.
     fn check_command(
@@ -247,7 +247,7 @@ impl<'r> Validator<'r> {
         cmd: &ast::Command,
     ) -> (
         &'static [OutcomeField],
-        &'static [OutcomeField],
+        &'static [ErrorTypeDef],
         Option<&'static dyn Mode>,
     ) {
         let Some(state) = self.actors.get(actor_name) else {
@@ -314,7 +314,7 @@ impl<'r> Validator<'r> {
 
         (
             cmd_def.ok_fields(),
-            cmd_def.error_fields(),
+            cmd_def.error_types(),
             cmd_def.transitions_to(),
         )
     }
@@ -373,17 +373,13 @@ impl<'r> Validator<'r> {
         actor_name: &str,
         expr: &Expr,
         last_ok_fields: &'static [OutcomeField],
-        last_error_fields: &'static [OutcomeField],
+        last_error_types: &'static [ErrorTypeDef],
         outcome: CommandOutcome,
     ) -> ValueType {
         match expr {
             Expr::MemberAccess { .. } => {
-                if let Some((ty, _)) =
-                    resolve_outcome_chain(expr, last_ok_fields, last_error_fields)
-                {
-                    return ty;
-                }
-                ValueType::Unknown
+                resolve_outcome_chain(expr, last_ok_fields, last_error_types)
+                    .unwrap_or(ValueType::Unknown)
             }
             Expr::Ident(ident) => {
                 if let Some(state) = self.actors.get(actor_name) {
@@ -401,29 +397,55 @@ impl<'r> Validator<'r> {
     }
 }
 
-/// Walk a chain of `MemberAccess` rooted at `ok` or `error` and resolve it
-/// against the last command's declared outcome fields. Returns the terminal
-/// field's type and its nested `fields` slice (empty for leaves). Returns
-/// `None` if the chain doesn't root at `ok`/`error` or any step doesn't
-/// resolve in the declared schema.
 fn resolve_outcome_chain(
     expr: &Expr,
     last_ok_fields: &'static [OutcomeField],
-    last_error_fields: &'static [OutcomeField],
-) -> Option<(ValueType, &'static [OutcomeField])> {
-    match expr {
-        Expr::Ident(ident) => match ident.name.as_str() {
-            "ok" => Some((ValueType::Record, last_ok_fields)),
-            "error" => Some((ValueType::Record, last_error_fields)),
+    last_error_types: &'static [ErrorTypeDef],
+) -> Option<ValueType> {
+    let Expr::MemberAccess {
+        object, property, ..
+    } = expr
+    else {
+        return None;
+    };
+
+    match object.as_ref() {
+        Expr::Ident(root) => match root.name.as_str() {
+            "ok" => last_ok_fields
+                .iter()
+                .find(|f| f.name == property.name)
+                .map(|f| f.ty),
+            "error" => match property.name.as_str() {
+                "type" => Some(ValueType::Atom),
+                "message" => Some(ValueType::String),
+                // Bare `error.<variant>` — variant exists but isn't a leaf.
+                _ => last_error_types
+                    .iter()
+                    .find(|v| v.name == property.name)
+                    .map(|_| ValueType::Unknown),
+            },
             _ => None,
         },
         Expr::MemberAccess {
-            object, property, ..
+            object: inner_object,
+            property: variant_prop,
+            ..
         } => {
-            let (_ty, parent_fields) =
-                resolve_outcome_chain(object, last_ok_fields, last_error_fields)?;
-            let f = parent_fields.iter().find(|f| f.name == property.name)?;
-            Some((f.ty, f.fields))
+            // Two-deep chain must be `error.<variant>.<field>`.
+            let Expr::Ident(root) = inner_object.as_ref() else {
+                return None;
+            };
+            if root.name != "error" {
+                return None;
+            }
+            let variant = last_error_types
+                .iter()
+                .find(|v| v.name == variant_prop.name)?;
+            variant
+                .fields
+                .iter()
+                .find(|f| f.name == property.name)
+                .map(|f| f.ty)
         }
         _ => None,
     }
@@ -632,7 +654,7 @@ as alice:
   connect,
     user: \"u\"
     database: \"d\"
-  assert error.code == 1
+  assert error.type == :auth
   connect,
     user: \"u\"
     database: \"d\"
@@ -669,7 +691,7 @@ as alice:
     user: \"u\"
     database: \"d\"
   assert ok.rows == 1
-  assert error.code == 2
+  assert error.type == :auth
 ";
         assert_eq!(
             codes(&diags(src)),
@@ -689,7 +711,7 @@ as alice:
     user: \"u\"
     database: \"d\"
   let x = ok.rows
-  assert error.code == 1
+  assert error.type == :auth
 ";
         assert_eq!(
             codes(&diags(src)),
@@ -728,7 +750,7 @@ as alice:
   connect,
     user: \"u\"
     database: \"d\"
-  let e = error.code
+  let e = error.type
   connect,
     user: \"u\"
     database: \"d\"

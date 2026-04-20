@@ -46,17 +46,14 @@ macro_rules! http_verb {
                     OutcomeField {
                         name: "status_code",
                         ty: ValueType::Number,
-                        fields: &[],
                     },
                     OutcomeField {
                         name: "body",
                         ty: ValueType::Unknown,
-                        fields: &[],
                     },
                     OutcomeField {
                         name: "headers",
                         ty: ValueType::Unknown,
-                        fields: &[],
                     },
                 ];
                 FIELDS

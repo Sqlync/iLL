@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
 use std::time::{Duration, Instant};
 
-use super::commands::{ExecErrorDetails, RunError, RunOk};
+use super::commands::{ExecError, RunOk};
 use crate::actor_type::ActorInstance;
 use crate::runtime::{
     CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value,
@@ -28,16 +28,14 @@ const REASON_BAD_ENV: &str = "bad_env";
 const REASON_ALREADY_RUNNING: &str = "already_running";
 
 fn run_error(reason: &str, message: impl Into<String>) -> RunOutcome {
-    RunOutcome::Error(
-        RunError {
-            code: 1,
-            message: message.into(),
-            exec: ExecErrorDetails {
-                reason: reason.into(),
-            },
+    RunOutcome::Error {
+        variant: "exec",
+        message: message.into(),
+        fields: ExecError {
+            reason: reason.into(),
         }
         .into_record(),
-    )
+    }
 }
 
 fn classify_spawn_error(e: &io::Error) -> &'static str {
@@ -368,7 +366,7 @@ mod tests {
                 let pid = fields.get("pid").expect("pid field");
                 assert!(matches!(pid, Value::Number(n) if *n > 0));
             }
-            RunOutcome::Error(f) => panic!("expected Ok, got Error: {f:?}"),
+            RunOutcome::Error { message, .. } => panic!("expected Ok, got Error: {message}"),
             RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
         }
         assert!(matches!(inst.mode, ExecMode::Running(_)));
@@ -379,16 +377,15 @@ mod tests {
     }
 
     fn assert_exec_reason(outcome: &RunOutcome, expected: &str) {
-        let fields = match outcome {
-            RunOutcome::Error(f) => f,
+        let (variant, fields) = match outcome {
+            RunOutcome::Error {
+                variant, fields, ..
+            } => (*variant, fields),
             RunOutcome::Ok(_) => panic!("expected Error, got Ok"),
             RunOutcome::NotImplemented { .. } => panic!("expected Error, got NotImplemented"),
         };
-        let exec = match fields.get("exec") {
-            Some(Value::Record(r)) => r,
-            other => panic!("expected error.exec record, got {other:?}"),
-        };
-        match exec.get("reason") {
+        assert_eq!(variant, "exec", "expected error.exec variant");
+        match fields.get("reason") {
             Some(Value::Atom(a)) => assert_eq!(a, expected, "error.exec.reason mismatch"),
             other => panic!("expected error.exec.reason atom, got {other:?}"),
         }

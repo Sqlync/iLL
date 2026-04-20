@@ -183,19 +183,24 @@ fn run_as_block(block: &AsBlock, actors: &mut InstantiatedActors) -> Result<(), 
                     RunOutcome::Ok(fields) => {
                         scope.bind("ok", Value::Record(fields));
                     }
-                    RunOutcome::Error(fields) => {
+                    RunOutcome::Error {
+                        variant,
+                        message,
+                        fields,
+                    } => {
                         // An Error is a failure unless the following statements
                         // reference `error.*`, which commits the command to the
                         // error branch (matching validator semantics).
                         let was_expected = block_has_error_ref_after(block, idx);
-                        scope.bind("error", Value::Record(fields.clone()));
+                        let error_record = build_error_record(variant, &message, fields.clone());
+                        scope.bind("error", Value::Record(error_record.clone()));
                         if !was_expected {
                             let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
                             return Err(StatementReport::CommandFailure {
                                 actor: actor_name.clone(),
                                 command: cmd.name.name.clone(),
                                 span: cmd.span,
-                                error_fields: fields,
+                                error_fields: error_record,
                                 expect,
                             });
                         }
@@ -304,6 +309,22 @@ fn eval_keyword_args(
         out.insert(kw.key.name.clone(), v);
     }
     Ok(out)
+}
+
+/// Assemble the scope-visible `error` record from a `RunOutcome::Error`.
+/// Every error exposes `type` (atom naming the variant) and `message` so
+/// tests can report on an unexpected variant without knowing its schema.
+/// Variant-specific fields live under `error.<variant>`.
+fn build_error_record(
+    variant: &'static str,
+    message: &str,
+    fields: BTreeMap<String, Value>,
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    out.insert("type".into(), Value::Atom(variant.into()));
+    out.insert("message".into(), Value::String(message.to_string()));
+    out.insert(variant.into(), Value::Record(fields));
+    out
 }
 
 /// Check whether any statement after index `after` in the block references

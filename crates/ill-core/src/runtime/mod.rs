@@ -43,29 +43,25 @@ impl CommandArgs {
 
 // ── Outcomes ──────────────────────────────────────────────────────────────────
 
-/// The result of a command. `Ok` populates `ok.*`; `Error` populates `error.*`.
-/// `NotImplemented` is the default for Phase 6 actors that haven't yet been
-/// wired to a runtime.
+/// The result of a command. `Ok` populates `ok.*`; `Error` populates
+/// `error.*`. `NotImplemented` is the default for Phase 6 actors that haven't
+/// yet been wired to a runtime.
+///
+/// An `Error` carries the declared variant name, a generic human-readable
+/// message (always available as `error.message`), and the variant-specific
+/// fields. The harness assembles the final `error` record as
+/// `{ type: :variant, message: "...", <variant>: {fields} }`.
 pub enum RunOutcome {
     Ok(BTreeMap<String, Value>),
-    Error(BTreeMap<String, Value>),
+    Error {
+        variant: &'static str,
+        message: String,
+        fields: BTreeMap<String, Value>,
+    },
     NotImplemented {
         actor: &'static str,
         cmd: &'static str,
     },
-}
-
-impl RunOutcome {
-    /// Build a simple `Error` outcome via the `StandardError` shape.
-    pub fn error(code: i64, message: impl Into<String>) -> Self {
-        RunOutcome::Error(
-            crate::actor_type::StandardError {
-                code,
-                message: message.into(),
-            }
-            .into_record(),
-        )
-    }
 }
 
 /// The result of tearing down an actor instance. Teardown errors are reported

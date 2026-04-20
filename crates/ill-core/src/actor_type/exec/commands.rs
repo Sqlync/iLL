@@ -1,5 +1,5 @@
 use super::modes::{RUNNING, STOPPED};
-use crate::actor_type::{Command, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::actor_type::{Command, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
 use crate::define_outcome;
 
 define_outcome! {
@@ -10,24 +10,19 @@ define_outcome! {
 }
 
 define_outcome! {
-    /// exec-specific error details. Nested under `error.exec.*`. `reason`
-    /// is one of the atoms classified in `super::runtime`: `:invalid_command`,
+    /// Fields on `error.exec.*` when `exec.run` fails. `reason` is one of
+    /// the atoms classified in `super::runtime`: `:invalid_command`,
     /// `:command_not_found`, `:permission_denied`, `:spawn_failed`,
     /// `:bad_env`, `:already_running`.
-    pub ExecErrorDetails {
+    pub ExecError {
         reason: Atom,
     }
 }
 
-define_outcome! {
-    /// Error shape for `exec.run`. Extends the standard `code`/`message` pair
-    /// with a nested `exec` namespace for actor-specific classification.
-    pub RunError {
-        code: Number,
-        message: String,
-        exec: Record(ExecErrorDetails),
-    }
-}
+static EXEC_ERROR_TYPE: ErrorTypeDef = ErrorTypeDef {
+    name: "exec",
+    fields: ExecError::FIELDS,
+};
 
 pub struct Run;
 
@@ -58,8 +53,8 @@ impl Command for Run {
         RunOk::FIELDS
     }
 
-    fn error_fields(&self) -> &'static [OutcomeField] {
-        RunError::FIELDS
+    fn error_types(&self) -> &'static [ErrorTypeDef] {
+        std::slice::from_ref(&EXEC_ERROR_TYPE)
     }
 }
 

@@ -81,12 +81,10 @@ impl Command for Query {
             OutcomeField {
                 name: "rows",
                 ty: ValueType::Dynamic,
-                fields: &[],
             },
             OutcomeField {
                 name: "count",
                 ty: ValueType::Number,
-                fields: &[],
             },
         ];
         FIELDS

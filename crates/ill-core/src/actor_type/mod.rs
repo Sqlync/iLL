@@ -23,8 +23,6 @@ pub mod mqtt_client;
 pub mod outcome;
 pub mod pg_client;
 
-pub use outcome::StandardError;
-
 // ── Modes ──────────────────────────────────────────────────────────────────────
 //
 // Each mode is a zero-sized unit struct with a `'static` singleton. Identity is
@@ -58,9 +56,6 @@ pub enum ValueType {
     Bool,
     Atom,
     Bytes,
-    /// A nested record whose schema is statically known via
-    /// `OutcomeField::fields` on the enclosing descriptor.
-    Record,
     /// A structured runtime value produced by parsing (json, protobuf, etc.).
     /// The shape is not statically known to the validator.
     Dynamic,
@@ -84,15 +79,22 @@ pub struct KeywordArgDef {
 
 // ── Outcome field descriptors ──────────────────────────────────────────────────
 //
-// Declare the named fields available on `ok.*` and `error.*` after a command.
-// Commands that don't override `ok_fields` / `error_fields` return an empty
-// slice for ok and `StandardError::FIELDS` for error.
+// Declare the named fields available on `ok.*` after a successful command.
+// Error outcomes use `ErrorTypeDef` instead — each command declares a list of
+// possible error variants, each with its own fields. The harness always
+// surfaces `error.type` (atom naming the variant) and `error.message`
+// (generic string) so tests can report on an unexpected variant without
+// knowing its schema.
 
 pub struct OutcomeField {
     pub name: &'static str,
     pub ty: ValueType,
-    /// Nested schema when `ty == ValueType::Record`. Empty for leaf types.
-    /// Reference lets us build nested outcome descriptors without heap allocation.
+}
+
+/// One variant in a command's set of possible error outcomes. Addressed at
+/// runtime as `error.<name>.<field>` and in `.ill` source via the same path.
+pub struct ErrorTypeDef {
+    pub name: &'static str,
     pub fields: &'static [OutcomeField],
 }
 
@@ -129,11 +131,12 @@ pub trait Command: Send + Sync + 'static {
         &[]
     }
 
-    /// Named fields available on `error.*` after a failed execution.
-    /// Defaults to `StandardError::FIELDS` (`code`, `message`). Commands with
-    /// richer error data override this and define their own outcome struct.
-    fn error_fields(&self) -> &'static [OutcomeField] {
-        StandardError::FIELDS
+    /// Possible error variants this command can produce. Each variant's
+    /// fields are addressable as `error.<variant_name>.<field>`. Defaults to
+    /// empty — `error.type` and `error.message` are always available
+    /// regardless of declared variants.
+    fn error_types(&self) -> &'static [ErrorTypeDef] {
+        &[]
     }
 }
 

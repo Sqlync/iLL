@@ -192,12 +192,10 @@ impl Command for Receive {
             OutcomeField {
                 name: "topic",
                 ty: ValueType::String,
-                fields: &[],
             },
             OutcomeField {
                 name: "payload",
                 ty: ValueType::Unknown,
-                fields: &[],
             },
         ];
         FIELDS
