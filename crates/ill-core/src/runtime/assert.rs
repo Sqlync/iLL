@@ -49,11 +49,13 @@ fn is_truthy(v: &Value) -> bool {
     match v {
         Value::Bool(b) => *b,
         Value::Number(n) => *n != 0,
+        Value::Float(x) => *x != 0.0,
         Value::String(s) => !s.is_empty(),
         Value::Array(a) => !a.is_empty(),
         Value::Dict(fields) => !fields.is_empty(),
         Value::Bytes(b) => !b.is_empty(),
         Value::Atom(_) => true,
+        Value::Null => false,
         Value::Unit => false,
     }
 }

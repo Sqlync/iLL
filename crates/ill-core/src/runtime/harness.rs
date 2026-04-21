@@ -567,4 +567,13 @@ as never_runs:
             Some(StatementReport::AssertFailure { .. })
         ));
     }
+
+    // End-to-end pg_client coverage lives in
+    // `actor_type::pg_client::runtime::tests` — those hit a real
+    // postgres testcontainer via the `ActorInstance` API directly. A
+    // full .ill-level harness test would additionally need cross-actor
+    // var access (`db.port`) and `self.*` resolution so the pg_client
+    // `connect` can pick up the container's mapped port, neither of
+    // which are wired into the runtime yet. See `examples/pg_client/`
+    // for the target `.ill` shape.
 }

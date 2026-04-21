@@ -28,7 +28,7 @@ as alice:
     password: "wrong"
     port: db.port
     database: "test"
-  assert error.auth.reason == :authentication_failed
+  assert error.connect.reason == :authentication_failed
 
 # reconnect with valid credentials
 as alice:
