@@ -13,6 +13,14 @@ use crate::ast::StringFragment;
 use super::eval::{eval, Scope};
 use super::{RuntimeError, Value};
 
+mod hex;
+mod json;
+mod sql;
+
+use hex::Hex;
+use json::Json;
+use sql::Sql;
+
 pub trait Sigil: Send + Sync {
     fn name(&self) -> &'static str;
 
@@ -84,40 +92,6 @@ impl Registry {
     }
 }
 
-// ── Sigils ────────────────────────────────────────────────────────────────────
-
-/// `~sql` — a SQL string. For now it's a plain string with tagged syntax;
-/// parameterization is deferred until pg_client needs it.
-pub struct Sql;
-
-impl Sigil for Sql {
-    fn name(&self) -> &'static str {
-        "sql"
-    }
-}
-
-/// `~json` — stub. Evaluates as the rendered string for now. When the http
-/// actor actually consumes JSON bodies this should parse + re-emit canonical
-/// form, or produce a structured `Value::Dict`.
-pub struct Json;
-
-impl Sigil for Json {
-    fn name(&self) -> &'static str {
-        "json"
-    }
-}
-
-/// `~hex` — stub. Evaluates as the rendered string for now. When a consumer
-/// (e.g. mqtt) actually needs binary payloads this should override `eval` to
-/// hex-decode into `Value::Bytes`.
-pub struct Hex;
-
-impl Sigil for Hex {
-    fn name(&self) -> &'static str {
-        "hex"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,32 +102,8 @@ mod tests {
     }
 
     #[test]
-    fn registry_knows_sql() {
-        assert!(Registry::global().get("sql").is_some());
+    fn unknown_sigil_lookup_is_none() {
         assert!(Registry::global().get("does_not_exist").is_none());
-    }
-
-    #[test]
-    fn sql_eval_plain_text() {
-        let scope = Scope::new();
-        let frags = vec![StringFragment::Text("SELECT 1".into())];
-        let v = Sql.eval(&frags, &scope).unwrap();
-        assert_eq!(v, Value::String("SELECT 1".into()));
-    }
-
-    #[test]
-    fn sql_eval_with_interpolation() {
-        let mut scope = Scope::new();
-        scope.bind("n", Value::Number(42));
-        let frags = vec![
-            StringFragment::Text("x = ".into()),
-            StringFragment::Interpolation(Expr::Ident(Ident {
-                name: "n".into(),
-                span: span(),
-            })),
-        ];
-        let v = Sql.eval(&frags, &scope).unwrap();
-        assert_eq!(v, Value::String("x = 42".into()));
     }
 
     #[test]
