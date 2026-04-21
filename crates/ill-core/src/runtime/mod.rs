@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 pub mod value;
 
-pub use value::{Record, Value};
+pub use value::{Dict, Value};
 
 pub mod assert;
 pub mod eval;
@@ -18,14 +18,14 @@ pub mod report;
 /// Keyword arguments evaluated at an actor declaration site, plus the
 /// directory containing the .ill file (used to resolve relative paths).
 pub struct ConstructArgs {
-    pub keyword: Record,
+    pub keyword: Dict,
     pub source_dir: PathBuf,
 }
 
 /// Arguments passed to a command invocation. Positional + keyword.
 pub struct CommandArgs {
     pub positional: Vec<Value>,
-    pub keyword: Record,
+    pub keyword: Dict,
 }
 
 impl ConstructArgs {
@@ -49,10 +49,10 @@ impl CommandArgs {
 /// An `Error` carries the declared variant name and its fields. The harness
 /// assembles the final `error` record as `{ type: :variant, <variant>: {fields} }`.
 pub enum RunOutcome {
-    Ok(Record),
+    Ok(Dict),
     Error {
         variant: &'static str,
-        fields: Record,
+        fields: Dict,
     },
     NotImplemented {
         actor: &'static str,

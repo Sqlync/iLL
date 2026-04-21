@@ -1,8 +1,8 @@
 //! Typed outcome shapes.
 //!
 //! `define_outcome!` generates a struct, a `FIELDS` constant, and an
-//! `into_record` method from a single declaration. Actors build the typed
-//! struct and call `into_record()` at the `RunOutcome` boundary; the `FIELDS`
+//! `into_dict` method from a single declaration. Actors build the typed
+//! struct and call `into_dict()` at the `RunOutcome` boundary; the `FIELDS`
 //! constant is what commands return from `ok_fields` and what error variant
 //! descriptors reference. Using struct literal syntax gives the compiler full
 //! coverage on field names and types, so declared schema and constructed
@@ -42,7 +42,7 @@ macro_rules! __outcome_wrap {
 }
 
 /// Define an outcome type: one declaration yields the struct, the `FIELDS`
-/// metadata, and an `into_record` conversion to the scope-visible map.
+/// metadata, and an `into_dict` conversion to the scope-visible map.
 ///
 /// ```ignore
 /// define_outcome! {
@@ -72,8 +72,8 @@ macro_rules! define_outcome {
                 },)*
             ];
 
-            pub fn into_record(self) -> $crate::runtime::Record {
-                let mut m = $crate::runtime::Record::new();
+            pub fn into_dict(self) -> $crate::runtime::Dict {
+                let mut m = $crate::runtime::Dict::new();
                 $(m.insert(
                     stringify!($field).into(),
                     $crate::__outcome_wrap!($kind, self.$field),
@@ -107,12 +107,12 @@ mod tests {
     }
 
     #[test]
-    fn into_record_produces_correct_values() {
+    fn into_dict_produces_correct_values() {
         let s = SampleOutcome {
             code: 7,
             message: "boom".into(),
         };
-        let rec = s.into_record();
+        let rec = s.into_dict();
         assert_eq!(rec.get("code"), Some(&Value::Number(7)));
         assert_eq!(rec.get("message"), Some(&Value::String("boom".into())));
     }

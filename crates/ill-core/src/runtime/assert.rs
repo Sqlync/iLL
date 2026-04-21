@@ -54,7 +54,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Number(n) => *n != 0,
         Value::String(s) => !s.is_empty(),
         Value::Array(a) => !a.is_empty(),
-        Value::Record(r) => !r.is_empty(),
+        Value::Dict(r) => !r.is_empty(),
         Value::Bytes(b) => !b.is_empty(),
         Value::Atom(_) => true,
         Value::Unit => false,

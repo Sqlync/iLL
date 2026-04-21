@@ -1,8 +1,8 @@
-// Runtime values. Mirrors `ValueType` 1:1 plus `Record` (for `ok.*` /
+// Runtime values. Mirrors `ValueType` 1:1 plus `Dict` (for `ok.*` /
 // `error.*` / struct-shaped kwargs) and `Unit` (for values not yet available,
 // e.g. `ok.exit` before process teardown).
 //
-// `Record` is an `IndexMap` so field iteration follows insertion order. That
+// `Dict` is an `IndexMap` so field iteration follows insertion order. That
 // matters for positional access like `ok.col[0]` on query results, where the
 // nth entry means "the nth column as declared" — alphabetical ordering would
 // surprise the reader.
@@ -12,9 +12,9 @@ use std::fmt;
 use indexmap::IndexMap;
 
 /// An ordered map of field name → value. Insertion order is preserved so that
-/// integer indexing into a record (`record[0]`) means "the nth inserted
-/// field", which is what examples like `ok.col[0]` rely on.
-pub type Record = IndexMap<String, Value>;
+/// integer indexing into a dict (`dict[0]`) means "the nth inserted field",
+/// which is what examples like `ok.col[0]` rely on.
+pub type Dict = IndexMap<String, Value>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -24,7 +24,7 @@ pub enum Value {
     Atom(String),
     Bytes(Vec<u8>),
     Array(Vec<Value>),
-    Record(Record),
+    Dict(Dict),
     Unit,
 }
 
@@ -37,7 +37,7 @@ impl Value {
             Value::Atom(_) => "atom",
             Value::Bytes(_) => "bytes",
             Value::Array(_) => "array",
-            Value::Record(_) => "record",
+            Value::Dict(_) => "dict",
             Value::Unit => "unit",
         }
     }
@@ -61,7 +61,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::Record(fields) => {
+            Value::Dict(fields) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in fields.iter().enumerate() {
                     if i > 0 {
