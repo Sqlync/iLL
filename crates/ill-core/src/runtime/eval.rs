@@ -2,13 +2,15 @@
 // idents resolved against a scope, member access on Dicts, plain string
 // concatenation of fragments, and indexing into arrays and dicts (used by
 // query-result assertions like `ok.row[0]`, `ok.col["name"]`, `ok.cell[i, j]`).
-// Sigils, regex, and `let parse` are deferred — they return an Eval error so
-// the test fails clearly if an example outgrows this subset.
+// Sigils dispatch through `runtime::sigil::Registry`. `let parse` is still
+// deferred — it returns an Eval error so the test fails clearly if an example
+// outgrows this subset.
 
 use std::collections::BTreeMap;
 
-use crate::ast::{Expr, StringFragment, StringLit};
+use crate::ast::{Expr, StringLit};
 
+use super::sigil::{concat_fragments, Registry as SigilRegistry};
 use super::{RuntimeError, Value};
 
 /// Name→Value scope. `ok`, `error`, `self`, and per-actor vars all live here
@@ -75,10 +77,24 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
             }
             Ok(Value::Array(out))
         }
-        Expr::Sigil(s) => Err(RuntimeError::Eval(format!(
-            "sigil `~{}` not yet supported in runtime",
-            s.name.name
-        ))),
+        Expr::Sigil(s) => {
+            let Some(sigil) = SigilRegistry::global().get(&s.name.name) else {
+                return Err(RuntimeError::Eval(format!(
+                    "unknown sigil `~{}`",
+                    s.name.name
+                )));
+            };
+            let value = sigil.eval(&s.fragments, scope)?;
+            if !value.is_of_type(sigil.output_type()) {
+                return Err(RuntimeError::Eval(format!(
+                    "sigil `~{}` declared {:?} but produced {}",
+                    sigil.name(),
+                    sigil.output_type(),
+                    value.type_name()
+                )));
+            }
+            Ok(value)
+        }
         Expr::Index {
             object, indices, ..
         } => {
@@ -131,28 +147,7 @@ fn index_into(container: &Value, index: &Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_string_lit(lit: &StringLit, scope: &Scope) -> Result<Value, RuntimeError> {
-    let mut out = String::new();
-    for frag in &lit.fragments {
-        match frag {
-            StringFragment::Text(t) => out.push_str(t),
-            StringFragment::Interpolation(expr) => {
-                let v = eval(expr, scope)?;
-                match v {
-                    Value::String(s) => out.push_str(&s),
-                    Value::Number(n) => out.push_str(&n.to_string()),
-                    Value::Bool(b) => out.push_str(&b.to_string()),
-                    Value::Atom(a) => out.push_str(&a),
-                    other => {
-                        return Err(RuntimeError::Eval(format!(
-                            "cannot interpolate {} into string",
-                            other.type_name()
-                        )))
-                    }
-                }
-            }
-        }
-    }
-    Ok(Value::String(out))
+    concat_fragments(&lit.fragments, scope).map(Value::String)
 }
 
 #[cfg(test)]
@@ -255,7 +250,7 @@ mod tests {
         let e = index_expr(
             Expr::Ident(ident("r")),
             vec![Expr::StringLit(crate::ast::StringLit {
-                fragments: vec![StringFragment::Text("name".into())],
+                fragments: vec![crate::ast::StringFragment::Text("name".into())],
                 span: span(),
             })],
         );

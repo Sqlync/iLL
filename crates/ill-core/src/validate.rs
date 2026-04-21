@@ -17,6 +17,7 @@ use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeFie
 use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
+use crate::runtime::sigil::Registry as SigilRegistry;
 
 /// Per-actor state threaded through the symbolic walk.
 struct ActorState {
@@ -496,12 +497,10 @@ fn expr_type(expr: &Expr) -> ValueType {
         Expr::Number(_) => ValueType::Number,
         Expr::Bool(_) => ValueType::Bool,
         Expr::Atom(_) => ValueType::Atom,
-        Expr::Sigil(sigil) => match sigil.name.name.as_str() {
-            "sql" => ValueType::String,
-            "json" => ValueType::Dynamic,
-            "hex" => ValueType::Bytes,
-            _ => ValueType::Unknown,
-        },
+        Expr::Sigil(sigil) => SigilRegistry::global()
+            .get(&sigil.name.name)
+            .map(|s| s.output_type())
+            .unwrap_or(ValueType::Unknown),
         _ => ValueType::Unknown,
     }
 }
