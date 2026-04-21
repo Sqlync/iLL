@@ -63,6 +63,7 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 ## Deferred
 Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
 
+- [ ] handle Docker images that use more than one port
 - [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)
   - also, TBD: how to handle expected actor death
 - [ ] Docker optimizations
@@ -70,4 +71,3 @@ Cross-cutting concerns that apply to multiple actors or require broader design. 
     - this would require two passes, one to prep images, one to run
   - if multiple tests use the same image or Dockerfile make sure we are smart about resource usage. likely lots here
   - ensure we don't / can't get zombies. https://github.com/testcontainers/testcontainers-rs/issues/577
-    

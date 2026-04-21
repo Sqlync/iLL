@@ -92,13 +92,6 @@ pub struct Running {
     /// `block_in_place` on the current runtime), so a mid-test panic that
     /// drops this field before teardown runs still cleans up.
     container: ContainerAsync<GenericImage>,
-    /// Container port the user asked us to expose (for `get_host_port_ipv4`).
-    /// Retained for a future `port` member-var getter on running actors.
-    #[allow(dead_code)]
-    exposed_port: Option<u16>,
-    /// Resolved host port (0 when `port:` was not set). Same future use.
-    #[allow(dead_code)]
-    host_port: u16,
 }
 
 impl ContainerInstance {
@@ -238,12 +231,10 @@ impl Stopped {
         // `:bad_port` rather than silently starting the container with no
         // port exposed — the user asked for something and we couldn't
         // deliver it, so failure is less surprising than success.
-        let exposed_port = match port_kw {
-            Some(v) => match value_as_u16(v) {
-                Some(p) => Some(p),
-                None => return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT)),
-            },
-            None => None,
+        let exposed_port = match port_kw.map(value_as_u16) {
+            None => None,             // not supplied
+            Some(Some(p)) => Some(p), // supplied and valid
+            Some(None) => return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT)),
         };
         let mut image = GenericImage::new(image_name, image_tag);
         if let Some(p) = exposed_port {
@@ -283,11 +274,7 @@ impl Stopped {
                     port: host_port as i64,
                 };
                 (
-                    ContainerMode::Running(Running {
-                        container,
-                        exposed_port,
-                        host_port,
-                    }),
+                    ContainerMode::Running(Running { container }),
                     RunOutcome::Ok(ok.into_record()),
                 )
             }
