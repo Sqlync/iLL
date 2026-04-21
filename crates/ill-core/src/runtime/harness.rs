@@ -71,17 +71,19 @@ async fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestRep
     // so far.
     for item in &source.items {
         match item {
-            TopLevel::ActorDeclaration(decl) => match construct_actor(registry, decl, source_dir) {
-                Ok(inst) => actors.push(decl.name.name.clone(), inst),
-                Err(msg) => {
-                    statements.push(StatementReport::ConstructFailure {
-                        actor: decl.name.name.clone(),
-                        message: msg,
-                        span: decl.span,
-                    });
-                    break;
+            TopLevel::ActorDeclaration(decl) => {
+                match construct_actor(registry, decl, source_dir).await {
+                    Ok(inst) => actors.push(decl.name.name.clone(), inst),
+                    Err(msg) => {
+                        statements.push(StatementReport::ConstructFailure {
+                            actor: decl.name.name.clone(),
+                            message: msg,
+                            span: decl.span,
+                        });
+                        break;
+                    }
                 }
-            },
+            }
             TopLevel::AsBlock(block) => {
                 if let Err(stmt) = run_as_block(block, &mut actors).await {
                     statements.push(stmt);
@@ -101,7 +103,7 @@ async fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestRep
     }
 }
 
-fn construct_actor(
+async fn construct_actor(
     registry: &Registry,
     decl: &ActorDeclaration,
     source_dir: &Path,
@@ -117,7 +119,7 @@ fn construct_actor(
         keyword,
         source_dir: source_dir.to_path_buf(),
     };
-    actor_type.construct(&args).map_err(|e| e.to_string())
+    actor_type.construct(&args).await.map_err(|e| e.to_string())
 }
 
 /// Walk an `as` block. `Err` signals that a failure was recorded and the test

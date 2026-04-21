@@ -141,6 +141,7 @@ pub trait Command: Send + Sync + 'static {
 
 // ── Actor types ────────────────────────────────────────────────────────────────
 
+#[async_trait::async_trait]
 pub trait ActorType: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
@@ -165,9 +166,17 @@ pub trait ActorType: Send + Sync + 'static {
         self.modes().iter().copied().find(|m| m.name() == name)
     }
 
-    /// Construct a runtime instance from declaration-site kwargs. Default
-    /// returns `ActorNotImplemented` — Phase 6 actors opt in by overriding.
-    fn construct(&self, _args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+    /// Construct a runtime instance from declaration-site kwargs.
+    ///
+    /// Async because some actor types (e.g. `container`) do real I/O at
+    /// declaration time — pulling images or building from a Dockerfile —
+    /// so that failures surface as a construct error rather than buried in
+    /// the first command. Default returns `ActorNotImplemented` — Phase 6
+    /// actors opt in by overriding.
+    async fn construct(
+        &self,
+        _args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         Err(RuntimeError::ActorNotImplemented(self.name()))
     }
 }

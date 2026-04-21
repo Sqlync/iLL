@@ -1,5 +1,37 @@
 use super::modes::{RUNNING, STOPPED};
-use crate::actor_type::{Command, KeywordArgDef, Mode, ValueType};
+use crate::actor_type::{Command, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::define_outcome;
+
+define_outcome! {
+    /// Result of `container.run` — the started container's id and its mapped
+    /// host port. `port` is 0 when the user did not supply a `port:` kwarg.
+    pub RunOk {
+        id: String,
+        port: Number,
+    }
+}
+
+define_outcome! {
+    /// Fields on `error.container.*` for failing container commands.
+    ///
+    /// Atoms produced by `run`: `:timeout`, `:port_conflict`,
+    /// `:already_running`, `:docker_unavailable`.
+    ///
+    /// Atoms produced by `stop`: `:not_running`, `:timeout`,
+    /// `:docker_unavailable`.
+    ///
+    /// Image acquisition failures (missing image, pull failure, Dockerfile
+    /// build failure) surface at construct time as `ConstructFailure`, not
+    /// here — by the time `run` executes, the image is already resolved.
+    pub ContainerError {
+        reason: Atom,
+    }
+}
+
+static CONTAINER_ERROR_TYPES: &[ErrorTypeDef] = &[ErrorTypeDef {
+    name: "container",
+    fields: ContainerError::FIELDS,
+}];
 
 pub struct Run;
 
@@ -37,6 +69,14 @@ impl Command for Run {
             },
         ]
     }
+
+    fn ok_fields(&self) -> &'static [OutcomeField] {
+        RunOk::FIELDS
+    }
+
+    fn error_types(&self) -> &'static [ErrorTypeDef] {
+        CONTAINER_ERROR_TYPES
+    }
 }
 
 pub struct Stop;
@@ -53,6 +93,10 @@ impl Command for Stop {
 
     fn transitions_to(&self) -> Option<&'static dyn Mode> {
         Some(STOPPED)
+    }
+
+    fn error_types(&self) -> &'static [ErrorTypeDef] {
+        CONTAINER_ERROR_TYPES
     }
 }
 
