@@ -12,6 +12,7 @@ pub mod assert;
 pub mod eval;
 pub mod harness;
 pub mod report;
+pub mod sigil;
 
 // ── Args passed to construct / execute ────────────────────────────────────────
 
