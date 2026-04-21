@@ -141,6 +141,6 @@ mod tests {
         let frags = vec![StringFragment::Text("not bytes".into())];
         let scope = Scope::new();
         let v = Liar.eval(&frags, &scope).unwrap();
-        assert!(!Liar.output_type().accepts(&v));
+        assert!(!v.is_of_type(Liar.output_type()));
     }
 }

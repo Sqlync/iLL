@@ -85,7 +85,7 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
                 )));
             };
             let value = sigil.eval(&s.fragments, scope)?;
-            if !sigil.output_type().accepts(&value) {
+            if !value.is_of_type(sigil.output_type()) {
                 return Err(RuntimeError::Eval(format!(
                     "sigil `~{}` declared {:?} but produced {}",
                     sigil.name(),

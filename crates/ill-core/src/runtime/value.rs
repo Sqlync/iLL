@@ -11,6 +11,8 @@ use std::fmt;
 
 use indexmap::IndexMap;
 
+use crate::actor_type::ValueType;
+
 /// An ordered map of field name → value. Insertion order is preserved so that
 /// integer indexing into a dict (`dict[0]`) means "the nth inserted field",
 /// which is what examples like `ok.col[0]` rely on.
@@ -40,6 +42,22 @@ impl Value {
             Value::Dict(_) => "dict",
             Value::Unit => "unit",
         }
+    }
+
+    /// True if this value is a valid inhabitant of `ty`. `Dynamic` and
+    /// `Unknown` are permissive (they match any runtime value); every other
+    /// variant is strict. `Array`/`Dict`/`Unit` match no concrete `ValueType`
+    /// — use `Dynamic` to accept them.
+    pub fn is_of_type(&self, ty: ValueType) -> bool {
+        matches!(
+            (ty, self),
+            (ValueType::Dynamic | ValueType::Unknown, _)
+                | (ValueType::String, Value::String(_))
+                | (ValueType::Number, Value::Number(_))
+                | (ValueType::Bool, Value::Bool(_))
+                | (ValueType::Atom, Value::Atom(_))
+                | (ValueType::Bytes, Value::Bytes(_))
+        )
     }
 }
 

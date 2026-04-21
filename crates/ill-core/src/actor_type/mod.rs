@@ -64,24 +64,6 @@ pub enum ValueType {
     Unknown,
 }
 
-impl ValueType {
-    /// True if `value` is a valid inhabitant of this type. `Dynamic` and
-    /// `Unknown` are permissive (they match any runtime value); every other
-    /// variant is strict.
-    pub fn accepts(self, value: &crate::runtime::Value) -> bool {
-        use crate::runtime::Value;
-        matches!(
-            (self, value),
-            (ValueType::Dynamic | ValueType::Unknown, _)
-                | (ValueType::String, Value::String(_))
-                | (ValueType::Number, Value::Number(_))
-                | (ValueType::Bool, Value::Bool(_))
-                | (ValueType::Atom, Value::Atom(_))
-                | (ValueType::Bytes, Value::Bytes(_))
-        )
-    }
-}
-
 // ── Argument descriptors ───────────────────────────────────────────────────────
 
 pub struct ArgDef {
