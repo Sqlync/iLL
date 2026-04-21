@@ -1,8 +1,5 @@
 // Assert evaluator. Evaluates both sides, applies the op, returns a result
 // that reports the actual values back for failure messages.
-//
-// Supported operators:
-//   Eq, NotEq, Gt, Gte, Lt, Lte, Contains, NotContains, Matches, NotMatches
 
 use crate::ast::{Assert, ComparisonOp};
 
@@ -54,7 +51,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Number(n) => *n != 0,
         Value::String(s) => !s.is_empty(),
         Value::Array(a) => !a.is_empty(),
-        Value::Dict(r) => !r.is_empty(),
+        Value::Dict(fields) => !fields.is_empty(),
         Value::Bytes(b) => !b.is_empty(),
         Value::Atom(_) => true,
         Value::Unit => false,
@@ -64,18 +61,12 @@ fn is_truthy(v: &Value) -> bool {
 fn compare(left: &Value, right: &Value, op: ComparisonOp) -> Result<bool, RuntimeError> {
     use ComparisonOp::*;
     match op {
-        Eq => Ok(values_equal(left, right)),
-        NotEq => Ok(!values_equal(left, right)),
-        Gt | Gte | Lt | Lte => {
-            let ord = compare_ord(left, right)?;
-            Ok(match op {
-                Gt => ord == std::cmp::Ordering::Greater,
-                Gte => ord != std::cmp::Ordering::Less,
-                Lt => ord == std::cmp::Ordering::Less,
-                Lte => ord != std::cmp::Ordering::Greater,
-                _ => unreachable!(),
-            })
-        }
+        Eq => Ok(left == right),
+        NotEq => Ok(left != right),
+        Gt => Ok(compare_ord(left, right)? == std::cmp::Ordering::Greater),
+        Gte => Ok(compare_ord(left, right)? != std::cmp::Ordering::Less),
+        Lt => Ok(compare_ord(left, right)? == std::cmp::Ordering::Less),
+        Lte => Ok(compare_ord(left, right)? != std::cmp::Ordering::Greater),
         Contains => contains(left, right),
         NotContains => contains(left, right).map(|b| !b),
         Matches => matches_regex(left, right),
@@ -84,8 +75,7 @@ fn compare(left: &Value, right: &Value, op: ComparisonOp) -> Result<bool, Runtim
 }
 
 /// `matches` compiles the right-hand side as a regex and tests whether the
-/// left-hand string matches it. The regex is compiled per-assertion — fine for
-/// test files, but if usage patterns change we can cache.
+/// left-hand string matches it. Regex is compiled per assertion.
 fn matches_regex(subject: &Value, pattern: &Value) -> Result<bool, RuntimeError> {
     let (Value::String(s), Value::String(p)) = (subject, pattern) else {
         return Err(RuntimeError::Eval(format!(
@@ -99,8 +89,9 @@ fn matches_regex(subject: &Value, pattern: &Value) -> Result<bool, RuntimeError>
     Ok(re.is_match(s))
 }
 
-/// `contains` works on strings (substring) and arrays (membership). Other
-/// type pairings are an error so silent mis-comparisons can't hide bugs.
+/// `contains` works on strings (substring) and arrays (membership, by
+/// `Value`-equality). Haystack types outside those two are an error; needle
+/// type mismatches inside an array fall out as `false` via `PartialEq`.
 fn contains(haystack: &Value, needle: &Value) -> Result<bool, RuntimeError> {
     match (haystack, needle) {
         (Value::String(h), Value::String(n)) => Ok(h.contains(n.as_str())),
@@ -111,10 +102,6 @@ fn contains(haystack: &Value, needle: &Value) -> Result<bool, RuntimeError> {
             needle.type_name()
         ))),
     }
-}
-
-fn values_equal(a: &Value, b: &Value) -> bool {
-    a == b
 }
 
 fn compare_ord(a: &Value, b: &Value) -> Result<std::cmp::Ordering, RuntimeError> {
