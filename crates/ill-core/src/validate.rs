@@ -14,9 +14,7 @@
 use std::collections::HashMap;
 
 use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
-use crate::ast::{
-    self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel,
-};
+use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
 use crate::runtime::sigil::Registry as SigilRegistry;
@@ -78,9 +76,6 @@ impl<'r> Validator<'r> {
                 self.check_as_block(block);
             }
         }
-
-        // Cross-cutting: unknown sigils anywhere in the source.
-        check_sigils_in_source(source, &mut self.diagnostics);
     }
 
     // ── Actor declarations ────────────────────────────────────────────────────
@@ -495,112 +490,6 @@ pub(crate) fn expr_starts_with_ident(expr: &Expr, name: &str) -> bool {
     }
 }
 
-/// Walk every `Expr` in the source looking for sigils. Emit `UnknownSigil` for
-/// any sigil whose name isn't registered. Sigil-specific content validation
-/// (e.g. "this isn't valid SQL") is deferred.
-fn check_sigils_in_source(source: &SourceFile, diagnostics: &mut Vec<Diagnostic>) {
-    let mut visit = |e: &Expr| {
-        if let Expr::Sigil(s) = e {
-            if SigilRegistry::global().get(&s.name.name).is_none() {
-                diagnostics.push(Diagnostic::error(
-                    s.name.span,
-                    DiagnosticCode::UnknownSigil,
-                    format!("unknown sigil `~{}`", s.name.name),
-                ));
-            }
-        }
-    };
-    for item in &source.items {
-        match item {
-            TopLevel::ActorDeclaration(decl) => {
-                for var in &decl.vars {
-                    if let Some(default) = &var.default {
-                        walk_expr(default, &mut visit);
-                    }
-                }
-                for kw in &decl.keyword_args {
-                    walk_kw(kw, &mut visit);
-                }
-            }
-            TopLevel::AsBlock(block) => {
-                for stmt in &block.body {
-                    match stmt {
-                        Statement::Command(cmd) => {
-                            for arg in &cmd.positional_args {
-                                walk_expr(arg, &mut visit);
-                            }
-                            for kw in &cmd.keyword_args {
-                                walk_kw(kw, &mut visit);
-                            }
-                        }
-                        Statement::Let(l) => match &l.value {
-                            ast::LetValue::Expr(e) => walk_expr(e, &mut visit),
-                            ast::LetValue::Parse { source, .. } => walk_expr(source, &mut visit),
-                        },
-                        Statement::Assignment(a) => {
-                            walk_expr(&a.target, &mut visit);
-                            walk_expr(&a.value, &mut visit);
-                        }
-                        Statement::Assert(a) => {
-                            walk_expr(&a.left, &mut visit);
-                            if let Some(r) = &a.right {
-                                walk_expr(r, &mut visit);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn walk_expr(expr: &Expr, visit: &mut impl FnMut(&Expr)) {
-    visit(expr);
-    match expr {
-        Expr::Sigil(s) => {
-            for frag in &s.fragments {
-                if let StringFragment::Interpolation(inner) = frag {
-                    walk_expr(inner, visit);
-                }
-            }
-        }
-        Expr::StringLit(lit) => {
-            for frag in &lit.fragments {
-                if let StringFragment::Interpolation(inner) = frag {
-                    walk_expr(inner, visit);
-                }
-            }
-        }
-        Expr::MemberAccess { object, .. } => walk_expr(object, visit),
-        Expr::Index {
-            object, indices, ..
-        } => {
-            walk_expr(object, visit);
-            for i in indices {
-                walk_expr(i, visit);
-            }
-        }
-        Expr::Array(items) => {
-            for i in items {
-                walk_expr(i, visit);
-            }
-        }
-        Expr::Ident(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Atom(_) => {}
-    }
-}
-
-fn walk_kw(kw: &KeywordArg, visit: &mut impl FnMut(&Expr)) {
-    match &kw.value {
-        ast::KeywordValue::Expr(e) => walk_expr(e, visit),
-        ast::KeywordValue::Map(pairs) => {
-            for (k, v) in pairs {
-                walk_expr(k, visit);
-                walk_expr(v, visit);
-            }
-        }
-    }
-}
-
 /// Context-free expression type — good enough for literals and simple forms.
 fn expr_type(expr: &Expr) -> ValueType {
     match expr {
@@ -690,24 +579,6 @@ as alice:
 ";
         // missing `database`
         assert_eq!(codes(&diags(src)), vec![DiagnosticCode::MissingRequiredArg]);
-    }
-
-    #[test]
-    fn known_sigil_passes_validation() {
-        let src = "\
-actor alice = pg_client
-as alice:
-  connect,
-    user: \"u\"
-    database: \"d\"
-  query ~sql`SELECT 1`
-";
-        let ds = diags(src);
-        assert!(
-            !ds.iter().any(|d| d.code == DiagnosticCode::UnknownSigil),
-            "did not expect UnknownSigil, got {:?}",
-            codes(&ds)
-        );
     }
 
     #[test]
