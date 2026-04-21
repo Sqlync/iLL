@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+indexmap = "2"
+regex = "1"
 shlex = "1"
 testcontainers = "0.27"
 thiserror = "2"

@@ -482,17 +482,17 @@ mod tests {
     // and expect each test to take multiple seconds (first run pulls the
     // base images; subsequent runs hit the daemon cache).
 
-    use std::collections::BTreeMap;
+    use crate::runtime::Record;
 
     fn empty_args() -> CommandArgs {
         CommandArgs {
             positional: Vec::new(),
-            keyword: BTreeMap::new(),
+            keyword: Record::new(),
         }
     }
 
     fn image_args(image: &str) -> ConstructArgs {
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("image".into(), Value::String(image.into()));
         ConstructArgs {
             keyword: kw,
@@ -598,7 +598,7 @@ mod tests {
             .await
             .ok()
             .expect("construct failed");
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         // A bare number where a record is required.
         kw.insert("env".into(), Value::Number(42));
         let outcome = inst
@@ -621,7 +621,7 @@ mod tests {
             .await
             .ok()
             .expect("construct failed");
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         // Out of u16 range — should surface `:bad_port`, not silently start
         // the container with no port exposed.
         kw.insert("port".into(), Value::Number(70_000));
@@ -657,7 +657,7 @@ mod tests {
         let mut f = std::fs::File::create(&df_path).unwrap();
         writeln!(f, "FROM alpine:3.19\nCMD [\"echo\", \"hello from ill\"]").unwrap();
 
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("dockerfile".into(), Value::String("Dockerfile".into()));
         let args = ConstructArgs {
             keyword: kw,
@@ -680,7 +680,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires docker"]
     async fn missing_dockerfile_fails_at_construct() {
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("dockerfile".into(), Value::String("nope.Dockerfile".into()));
         let args = ConstructArgs {
             keyword: kw,
@@ -696,7 +696,7 @@ mod tests {
     #[tokio::test]
     async fn both_image_and_dockerfile_rejected() {
         // No docker needed — fails before any I/O.
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("image".into(), Value::String("alpine:3.19".into()));
         kw.insert("dockerfile".into(), Value::String("./Dockerfile".into()));
         let args = ConstructArgs {
@@ -709,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn neither_image_nor_dockerfile_rejected() {
         let args = ConstructArgs {
-            keyword: BTreeMap::new(),
+            keyword: Record::new(),
             source_dir: std::env::temp_dir(),
         };
         let _msg = expect_construct_err(ContainerInstance::construct(&args).await);

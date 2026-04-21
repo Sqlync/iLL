@@ -5,7 +5,6 @@
 // second pass walks `as` blocks in source order. This keeps check and run
 // from drifting.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::actor_type::ActorInstance;
@@ -20,7 +19,7 @@ use crate::validate::expr_starts_with_ident;
 use super::assert::eval_assert;
 use super::eval::{eval, Scope};
 use super::report::{StatementReport, TeardownReport, TestReport};
-use super::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value};
+use super::{CommandArgs, ConstructArgs, Record, RunOutcome, RuntimeError, TeardownOutcome, Value};
 
 /// Run a single .ill test file and return a structured report.
 pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
@@ -281,16 +280,13 @@ fn eval_command_args(cmd: &CommandAst, scope: &Scope) -> Result<CommandArgs, Run
     })
 }
 
-fn eval_keyword_args(
-    args: &[KeywordArg],
-    scope: &Scope,
-) -> Result<BTreeMap<String, Value>, RuntimeError> {
-    let mut out = BTreeMap::new();
+fn eval_keyword_args(args: &[KeywordArg], scope: &Scope) -> Result<Record, RuntimeError> {
+    let mut out = Record::new();
     for kw in args {
         let v = match &kw.value {
             KeywordValue::Expr(e) => eval(e, scope)?,
             KeywordValue::Map(pairs) => {
-                let mut rec = BTreeMap::new();
+                let mut rec = Record::new();
                 for (k_expr, v_expr) in pairs {
                     // Bare identifier keys (e.g. `NGINX_HOST:` inside an
                     // `env:` block) are taken as literal key names rather
@@ -326,11 +322,8 @@ fn eval_keyword_args(
 /// Every error exposes `type` (atom naming the variant) and `message` so
 /// tests can report on an unexpected variant without knowing its schema.
 /// Variant-specific fields live under `error.<variant>`.
-fn build_error_record(
-    variant: &'static str,
-    fields: BTreeMap<String, Value>,
-) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
+fn build_error_record(variant: &'static str, fields: Record) -> Record {
+    let mut out = Record::new();
     out.insert("type".into(), Value::Atom(variant.into()));
     out.insert(variant.into(), Value::Record(fields));
     out

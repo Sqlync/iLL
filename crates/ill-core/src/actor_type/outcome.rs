@@ -72,10 +72,8 @@ macro_rules! define_outcome {
                 },)*
             ];
 
-            pub fn into_record(
-                self,
-            ) -> ::std::collections::BTreeMap<::std::string::String, $crate::runtime::Value> {
-                let mut m = ::std::collections::BTreeMap::new();
+            pub fn into_record(self) -> $crate::runtime::Record {
+                let mut m = $crate::runtime::Record::new();
                 $(m.insert(
                     stringify!($field).into(),
                     $crate::__outcome_wrap!($kind, self.$field),
@@ -88,7 +86,6 @@ macro_rules! define_outcome {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::actor_type::ValueType;
     use crate::runtime::Value;
 

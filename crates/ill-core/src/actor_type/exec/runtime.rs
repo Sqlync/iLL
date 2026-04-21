@@ -281,10 +281,10 @@ fn apply_env(cmd: &mut TokioCommand, env: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use crate::runtime::Record;
 
     fn construct_args(target: &str) -> ConstructArgs {
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("command".into(), Value::String(target.into()));
         ConstructArgs {
             keyword: kw,
@@ -295,14 +295,14 @@ mod tests {
     fn empty_args() -> CommandArgs {
         CommandArgs {
             positional: Vec::new(),
-            keyword: BTreeMap::new(),
+            keyword: Record::new(),
         }
     }
 
     #[test]
     fn missing_command_kwarg_errors() {
         let args = ConstructArgs {
-            keyword: BTreeMap::new(),
+            keyword: Record::new(),
             source_dir: std::env::temp_dir(),
         };
         let err = match ExecInstance::construct(&args) {
@@ -379,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn non_record_env_reports_bad_env() {
         let mut inst = ExecInstance::construct(&construct_args("sleep 60")).unwrap();
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("env".into(), Value::Number(42));
         let args = CommandArgs {
             positional: Vec::new(),
@@ -412,7 +412,7 @@ mod tests {
         writeln!(f, "#!/bin/sh\necho hi").unwrap();
 
         let target = path.to_str().unwrap().to_string();
-        let mut kw = BTreeMap::new();
+        let mut kw = Record::new();
         kw.insert("command".into(), Value::String(target));
         let args = ConstructArgs {
             keyword: kw,

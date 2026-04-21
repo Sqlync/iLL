@@ -1,9 +1,20 @@
 // Runtime values. Mirrors `ValueType` 1:1 plus `Record` (for `ok.*` /
 // `error.*` / struct-shaped kwargs) and `Unit` (for values not yet available,
 // e.g. `ok.exit` before process teardown).
+//
+// `Record` is an `IndexMap` so field iteration follows insertion order. That
+// matters for positional access like `ok.col[0]` on query results, where the
+// nth entry means "the nth column as declared" — alphabetical ordering would
+// surprise the reader.
 
-use std::collections::BTreeMap;
 use std::fmt;
+
+use indexmap::IndexMap;
+
+/// An ordered map of field name → value. Insertion order is preserved so that
+/// integer indexing into a record (`record[0]`) means "the nth inserted
+/// field", which is what examples like `ok.col[0]` rely on.
+pub type Record = IndexMap<String, Value>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -13,7 +24,7 @@ pub enum Value {
     Atom(String),
     Bytes(Vec<u8>),
     Array(Vec<Value>),
-    Record(BTreeMap<String, Value>),
+    Record(Record),
     Unit,
 }
 

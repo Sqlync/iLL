@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::ast::{ComparisonOp, Span};
 use crate::diagnostic::Diagnostic;
 
-use super::Value;
+use super::{Record, Value};
 
 pub struct TestReport {
     pub path: PathBuf,
@@ -28,7 +28,7 @@ pub enum StatementReport {
         actor: String,
         command: String,
         span: Span,
-        error_fields: std::collections::BTreeMap<String, Value>,
+        error_fields: Record,
         expect: Option<String>,
     },
     CommandNotImplemented {

@@ -1,8 +1,9 @@
 // Expression evaluator. Phase 5 supports what exec examples need: literals,
-// idents resolved against a scope, member access on Records, and plain string
-// concatenation of fragments. Sigils, regex, interpolation, array indexing,
-// and `let parse` are deferred — they return an Eval error so the test fails
-// clearly if an example outgrows this subset.
+// idents resolved against a scope, member access on Records, plain string
+// concatenation of fragments, and indexing into arrays and records (used by
+// query-result assertions like `ok.row[0]`, `ok.col["name"]`, `ok.cell[i, j]`).
+// Sigils, regex, and `let parse` are deferred — they return an Eval error so
+// the test fails clearly if an example outgrows this subset.
 
 use std::collections::BTreeMap;
 
@@ -78,9 +79,54 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
             "sigil `~{}` not yet supported in runtime",
             s.name.name
         ))),
-        Expr::Index { .. } => Err(RuntimeError::Eval(
-            "indexing not yet supported in runtime".into(),
-        )),
+        Expr::Index {
+            object, indices, ..
+        } => {
+            let mut current = eval(object, scope)?;
+            for idx_expr in indices {
+                let idx = eval(idx_expr, scope)?;
+                current = index_into(&current, &idx)?;
+            }
+            Ok(current)
+        }
+    }
+}
+
+/// Apply one level of indexing. Multi-arg indexing (`obj[i, j]`) is the same
+/// as repeated single-arg indexing — the caller folds across the index list.
+fn index_into(container: &Value, index: &Value) -> Result<Value, RuntimeError> {
+    match (container, index) {
+        (Value::Array(items), Value::Number(n)) => {
+            let i = usize::try_from(*n).map_err(|_| {
+                RuntimeError::Eval(format!("array index must be non-negative, got {n}"))
+            })?;
+            items.get(i).cloned().ok_or_else(|| {
+                RuntimeError::Eval(format!(
+                    "array index {i} out of bounds (length {})",
+                    items.len()
+                ))
+            })
+        }
+        (Value::Record(fields), Value::String(key)) => fields
+            .get(key)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Eval(format!("no field `{key}` on record"))),
+        (Value::Record(fields), Value::Number(n)) => {
+            let i = usize::try_from(*n).map_err(|_| {
+                RuntimeError::Eval(format!("record index must be non-negative, got {n}"))
+            })?;
+            fields.get_index(i).map(|(_, v)| v.clone()).ok_or_else(|| {
+                RuntimeError::Eval(format!(
+                    "record index {i} out of bounds (length {})",
+                    fields.len()
+                ))
+            })
+        }
+        (container, index) => Err(RuntimeError::Eval(format!(
+            "cannot index {} with {}",
+            container.type_name(),
+            index.type_name()
+        ))),
     }
 }
 
@@ -113,6 +159,7 @@ fn eval_string_lit(lit: &StringLit, scope: &Scope) -> Result<Value, RuntimeError
 mod tests {
     use super::*;
     use crate::ast::{Ident, Span};
+    use crate::runtime::Record;
 
     fn span() -> Span {
         Span { start: 0, end: 0 }
@@ -148,7 +195,7 @@ mod tests {
 
     #[test]
     fn member_access_on_record() {
-        let mut fields = BTreeMap::new();
+        let mut fields = Record::new();
         fields.insert("pid".into(), Value::Number(12345));
         let mut s = Scope::new();
         s.bind("ok", Value::Record(fields));
@@ -165,5 +212,95 @@ mod tests {
     fn undefined_name_errors() {
         let s = Scope::new();
         assert!(eval(&Expr::Ident(ident("nope")), &s).is_err());
+    }
+
+    fn index_expr(obj: Expr, indices: Vec<Expr>) -> Expr {
+        Expr::Index {
+            object: Box::new(obj),
+            indices,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn array_int_index() {
+        let mut s = Scope::new();
+        s.bind(
+            "xs",
+            Value::Array(vec![
+                Value::Number(10),
+                Value::Number(20),
+                Value::Number(30),
+            ]),
+        );
+        let e = index_expr(Expr::Ident(ident("xs")), vec![Expr::Number(1)]);
+        assert_eq!(eval(&e, &s).unwrap(), Value::Number(20));
+    }
+
+    #[test]
+    fn array_out_of_bounds_errors() {
+        let mut s = Scope::new();
+        s.bind("xs", Value::Array(vec![Value::Number(1)]));
+        let e = index_expr(Expr::Ident(ident("xs")), vec![Expr::Number(5)]);
+        assert!(eval(&e, &s).is_err());
+    }
+
+    #[test]
+    fn record_string_key() {
+        let mut fields = Record::new();
+        fields.insert("name".into(), Value::String("alice".into()));
+        let mut s = Scope::new();
+        s.bind("r", Value::Record(fields));
+
+        let e = index_expr(
+            Expr::Ident(ident("r")),
+            vec![Expr::StringLit(crate::ast::StringLit {
+                fragments: vec![StringFragment::Text("name".into())],
+                span: span(),
+            })],
+        );
+        assert_eq!(eval(&e, &s).unwrap(), Value::String("alice".into()));
+    }
+
+    #[test]
+    fn record_int_index_follows_insertion_order() {
+        let mut fields = Record::new();
+        fields.insert("zebra".into(), Value::Number(1));
+        fields.insert("apple".into(), Value::Number(2));
+        let mut s = Scope::new();
+        s.bind("r", Value::Record(fields));
+
+        let e = index_expr(Expr::Ident(ident("r")), vec![Expr::Number(0)]);
+        assert_eq!(
+            eval(&e, &s).unwrap(),
+            Value::Number(1),
+            "first inserted entry wins over alphabetical"
+        );
+    }
+
+    #[test]
+    fn multi_arg_indexing_is_sequential() {
+        // cell[0, 1] on [[10, 20], [30, 40]] → 20
+        let mut s = Scope::new();
+        s.bind(
+            "cell",
+            Value::Array(vec![
+                Value::Array(vec![Value::Number(10), Value::Number(20)]),
+                Value::Array(vec![Value::Number(30), Value::Number(40)]),
+            ]),
+        );
+        let e = index_expr(
+            Expr::Ident(ident("cell")),
+            vec![Expr::Number(0), Expr::Number(1)],
+        );
+        assert_eq!(eval(&e, &s).unwrap(), Value::Number(20));
+    }
+
+    #[test]
+    fn indexing_wrong_type_errors() {
+        let mut s = Scope::new();
+        s.bind("n", Value::Number(42));
+        let e = index_expr(Expr::Ident(ident("n")), vec![Expr::Number(0)]);
+        assert!(eval(&e, &s).is_err());
     }
 }

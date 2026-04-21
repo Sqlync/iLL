@@ -2,12 +2,11 @@
 // walk `as` blocks in order, dispatching per-actor commands. See the `exec`
 // actor's `runtime.rs` for the first concrete implementation.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod value;
 
-pub use value::Value;
+pub use value::{Record, Value};
 
 pub mod assert;
 pub mod eval;
@@ -19,14 +18,14 @@ pub mod report;
 /// Keyword arguments evaluated at an actor declaration site, plus the
 /// directory containing the .ill file (used to resolve relative paths).
 pub struct ConstructArgs {
-    pub keyword: BTreeMap<String, Value>,
+    pub keyword: Record,
     pub source_dir: PathBuf,
 }
 
 /// Arguments passed to a command invocation. Positional + keyword.
 pub struct CommandArgs {
     pub positional: Vec<Value>,
-    pub keyword: BTreeMap<String, Value>,
+    pub keyword: Record,
 }
 
 impl ConstructArgs {
@@ -50,10 +49,10 @@ impl CommandArgs {
 /// An `Error` carries the declared variant name and its fields. The harness
 /// assembles the final `error` record as `{ type: :variant, <variant>: {fields} }`.
 pub enum RunOutcome {
-    Ok(BTreeMap<String, Value>),
+    Ok(Record),
     Error {
         variant: &'static str,
-        fields: BTreeMap<String, Value>,
+        fields: Record,
     },
     NotImplemented {
         actor: &'static str,
