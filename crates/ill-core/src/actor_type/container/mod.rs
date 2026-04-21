@@ -1,13 +1,18 @@
-// The `container` actor type — a process running in a container, declared with
-// either a pre-built image or a Dockerfile path.
+// The `container` actor type — a process running in a container, declared
+// with either a pre-built image or a Dockerfile path. Construct is eager:
+// the image is pulled or built at declaration time so that `run` has no
+// acquisition failures to surface. See `runtime.rs`.
 
 pub mod commands;
 pub mod modes;
+pub mod runtime;
 
-use super::{ActorType, Command, KeywordArgDef, Mode, ValueType};
+use super::{ActorInstance, ActorType, Command, KeywordArgDef, Mode, ValueType};
+use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct Container;
 
+#[async_trait::async_trait]
 impl ActorType for Container {
     fn name(&self) -> &'static str {
         "container"
@@ -28,9 +33,9 @@ impl ActorType for Container {
     }
 
     fn constructor_keyword(&self) -> &'static [KeywordArgDef] {
-        // Exactly one of `image` or `dockerfile` should ultimately be required;
-        // Phase 4 accepts either (or neither, for purely parameterized declarations).
-        // Tighten once the grammar settles.
+        // The metadata says both are optional individually; the "exactly
+        // one" check lives in `ContainerInstance::construct` because it's
+        // a cross-kwarg invariant the current validator can't express.
         &[
             KeywordArgDef {
                 name: "image",
@@ -43,6 +48,14 @@ impl ActorType for Container {
                 required: false,
             },
         ]
+    }
+
+    async fn construct(
+        &self,
+        args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        let inst = runtime::ContainerInstance::construct(args).await?;
+        Ok(Box::new(inst))
     }
 }
 

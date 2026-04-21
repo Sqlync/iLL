@@ -63,5 +63,23 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 ## Deferred
 Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
 
+- [ ] reevaluate grammar around keyword args
+  harness.rs was recently changed to parse kwargs slightly differently to accomodate envs in containers. but we might want to do
+```
+ env: 
+   "NGINX_HOST": "localhost"
+```
+instead of 
+```
+ env: 
+   NGINX_HOST: "localhost"
+```
+
+- [ ] handle Docker images that use more than one port, note: this would be an array not a kwarg dict
 - [ ] Unexpected actor death during a test — how long-running actors signal and surface failure when they crash mid-test (affects exec, container, postgres, mqtt, any persistent service)
   - also, TBD: how to handle expected actor death
+- [ ] Docker optimizations
+  - do all image fetching, building before running the test
+    - this would require two passes, one to prep images, one to run
+  - if multiple tests use the same image or Dockerfile make sure we are smart about resource usage. likely lots here
+  - ensure we don't / can't get zombies. https://github.com/testcontainers/testcontainers-rs/issues/577

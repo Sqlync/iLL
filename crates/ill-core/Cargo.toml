@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 async-trait = "0.1"
 shlex = "1"
+testcontainers = "0.27"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util", "sync"] }
 tree-sitter = "0.26"

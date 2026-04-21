@@ -13,6 +13,7 @@ use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct Exec;
 
+#[async_trait::async_trait]
 impl ActorType for Exec {
     fn name(&self) -> &'static str {
         "exec"
@@ -40,7 +41,10 @@ impl ActorType for Exec {
         }]
     }
 
-    fn construct(&self, args: &ConstructArgs) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+    async fn construct(
+        &self,
+        args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         let inst = runtime::ExecInstance::construct(args)?;
         Ok(Box::new(inst))
     }
