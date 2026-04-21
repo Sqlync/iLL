@@ -5,7 +5,6 @@
 // second pass walks `as` blocks in source order. This keeps check and run
 // from drifting.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::actor_type::ActorInstance;
@@ -20,7 +19,7 @@ use crate::validate::expr_starts_with_ident;
 use super::assert::eval_assert;
 use super::eval::{eval, Scope};
 use super::report::{StatementReport, TeardownReport, TestReport};
-use super::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value};
+use super::{CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value};
 
 /// Run a single .ill test file and return a structured report.
 pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
@@ -186,26 +185,26 @@ async fn run_as_block(
 
                 match instance.execute(cmd_def.name(), &args).await {
                     RunOutcome::Ok(fields) => {
-                        scope.bind("ok", Value::Record(fields));
+                        scope.bind("ok", Value::Dict(fields));
                     }
                     RunOutcome::Error { variant, fields } => {
                         // An Error is a failure unless the following statements
                         // reference `error.*`, which commits the command to the
                         // error branch (matching validator semantics).
                         let was_expected = block_has_error_ref_after(block, idx);
-                        let error_record = build_error_record(variant, fields);
+                        let error_dict = build_error_dict(variant, fields);
                         if !was_expected {
                             let expect = cmd.annotation.as_ref().and_then(|a| a.value.clone());
-                            scope.bind("error", Value::Record(error_record.clone()));
+                            scope.bind("error", Value::Dict(error_dict.clone()));
                             return Err(StatementReport::CommandFailure {
                                 actor: actor_name.clone(),
                                 command: cmd.name.name.clone(),
                                 span: cmd.span,
-                                error_fields: error_record,
+                                error_fields: error_dict,
                                 expect,
                             });
                         }
-                        scope.bind("error", Value::Record(error_record));
+                        scope.bind("error", Value::Dict(error_dict));
                     }
                     RunOutcome::NotImplemented { actor, cmd: c } => {
                         return Err(StatementReport::CommandNotImplemented {
@@ -281,16 +280,13 @@ fn eval_command_args(cmd: &CommandAst, scope: &Scope) -> Result<CommandArgs, Run
     })
 }
 
-fn eval_keyword_args(
-    args: &[KeywordArg],
-    scope: &Scope,
-) -> Result<BTreeMap<String, Value>, RuntimeError> {
-    let mut out = BTreeMap::new();
+fn eval_keyword_args(args: &[KeywordArg], scope: &Scope) -> Result<Dict, RuntimeError> {
+    let mut out = Dict::new();
     for kw in args {
         let v = match &kw.value {
             KeywordValue::Expr(e) => eval(e, scope)?,
             KeywordValue::Map(pairs) => {
-                let mut rec = BTreeMap::new();
+                let mut rec = Dict::new();
                 for (k_expr, v_expr) in pairs {
                     // Bare identifier keys (e.g. `NGINX_HOST:` inside an
                     // `env:` block) are taken as literal key names rather
@@ -314,7 +310,7 @@ fn eval_keyword_args(
                     let value = eval(v_expr, scope)?;
                     rec.insert(key, value);
                 }
-                Value::Record(rec)
+                Value::Dict(rec)
             }
         };
         out.insert(kw.key.name.clone(), v);
@@ -322,17 +318,14 @@ fn eval_keyword_args(
     Ok(out)
 }
 
-/// Assemble the scope-visible `error` record from a `RunOutcome::Error`.
+/// Assemble the scope-visible `error` dict from a `RunOutcome::Error`.
 /// Every error exposes `type` (atom naming the variant) and `message` so
 /// tests can report on an unexpected variant without knowing its schema.
 /// Variant-specific fields live under `error.<variant>`.
-fn build_error_record(
-    variant: &'static str,
-    fields: BTreeMap<String, Value>,
-) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
+fn build_error_dict(variant: &'static str, fields: Dict) -> Dict {
+    let mut out = Dict::new();
     out.insert("type".into(), Value::Atom(variant.into()));
-    out.insert(variant.into(), Value::Record(fields));
+    out.insert(variant.into(), Value::Dict(fields));
     out
 }
 
