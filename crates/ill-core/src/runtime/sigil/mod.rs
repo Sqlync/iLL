@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use crate::actor_type::ValueType;
 use crate::ast::StringFragment;
 
 use super::eval::{eval, Scope};
@@ -24,8 +25,14 @@ use sql::Sql;
 pub trait Sigil: Send + Sync {
     fn name(&self) -> &'static str;
 
+    /// Static declaration of the `Value` shape this sigil produces. The
+    /// validator uses this for type checking; the runtime asserts the
+    /// declaration holds after each `eval`.
+    fn output_type(&self) -> ValueType;
+
     /// Produce the runtime `Value` for this sigil. Default: concatenate all
-    /// fragments (with interpolations rendered) into a `Value::String`.
+    /// fragments (with interpolations rendered) into a `Value::String`. Sigils
+    /// that declare a non-`String` `output_type()` must override this.
     fn eval(&self, fragments: &[StringFragment], scope: &Scope) -> Result<Value, RuntimeError> {
         concat_fragments(fragments, scope).map(Value::String)
     }
@@ -115,5 +122,25 @@ mod tests {
             span: span(),
         }))];
         assert!(concat_fragments(&frags, &scope).is_err());
+    }
+
+    #[test]
+    fn output_type_mismatch_is_caught_at_eval() {
+        // A sigil that declares Bytes but returns a String (the default).
+        // The Expr::Sigil arm runs `accepts` and rejects the mismatch.
+        struct Liar;
+        impl Sigil for Liar {
+            fn name(&self) -> &'static str {
+                "liar"
+            }
+            fn output_type(&self) -> ValueType {
+                ValueType::Bytes
+            }
+        }
+
+        let frags = vec![StringFragment::Text("not bytes".into())];
+        let scope = Scope::new();
+        let v = Liar.eval(&frags, &scope).unwrap();
+        assert!(!Liar.output_type().accepts(&v));
     }
 }

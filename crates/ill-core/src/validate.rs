@@ -608,12 +608,10 @@ fn expr_type(expr: &Expr) -> ValueType {
         Expr::Number(_) => ValueType::Number,
         Expr::Bool(_) => ValueType::Bool,
         Expr::Atom(_) => ValueType::Atom,
-        Expr::Sigil(sigil) => match sigil.name.name.as_str() {
-            "sql" => ValueType::String,
-            "json" => ValueType::Dynamic,
-            "hex" => ValueType::Bytes,
-            _ => ValueType::Unknown,
-        },
+        Expr::Sigil(sigil) => SigilRegistry::global()
+            .get(&sigil.name.name)
+            .map(|s| s.output_type())
+            .unwrap_or(ValueType::Unknown),
         _ => ValueType::Unknown,
     }
 }

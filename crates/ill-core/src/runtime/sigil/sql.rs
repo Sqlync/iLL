@@ -1,3 +1,5 @@
+use crate::actor_type::ValueType;
+
 use super::Sigil;
 
 /// `~sql` — a SQL string. For now it's a plain string with tagged syntax;
@@ -7,6 +9,10 @@ pub struct Sql;
 impl Sigil for Sql {
     fn name(&self) -> &'static str {
         "sql"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::String
     }
 }
 

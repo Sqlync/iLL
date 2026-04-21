@@ -77,13 +77,24 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
             }
             Ok(Value::Array(out))
         }
-        Expr::Sigil(s) => match SigilRegistry::global().get(&s.name.name) {
-            Some(sigil) => sigil.eval(&s.fragments, scope),
-            None => Err(RuntimeError::Eval(format!(
-                "unknown sigil `~{}`",
-                s.name.name
-            ))),
-        },
+        Expr::Sigil(s) => {
+            let Some(sigil) = SigilRegistry::global().get(&s.name.name) else {
+                return Err(RuntimeError::Eval(format!(
+                    "unknown sigil `~{}`",
+                    s.name.name
+                )));
+            };
+            let value = sigil.eval(&s.fragments, scope)?;
+            if !sigil.output_type().accepts(&value) {
+                return Err(RuntimeError::Eval(format!(
+                    "sigil `~{}` declared {:?} but produced {}",
+                    sigil.name(),
+                    sigil.output_type(),
+                    value.type_name()
+                )));
+            }
+            Ok(value)
+        }
         Expr::Index {
             object, indices, ..
         } => {
