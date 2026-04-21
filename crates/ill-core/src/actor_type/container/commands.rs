@@ -14,8 +14,8 @@ define_outcome! {
 define_outcome! {
     /// Fields on `error.container.*` for failing container commands.
     ///
-    /// Atoms produced by `run`: `:timeout`, `:port_conflict`,
-    /// `:already_running`, `:docker_unavailable`.
+    /// Atoms produced by `run`: `:timeout`, `:already_running`,
+    /// `:docker_unavailable`, `:bad_env`, `:bad_port`.
     ///
     /// Atoms produced by `stop`: `:not_running`, `:timeout`,
     /// `:docker_unavailable`.

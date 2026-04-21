@@ -25,13 +25,14 @@ use crate::runtime::{
 };
 
 /// Reason atoms surfaced on `error.container.reason`. Run: `:timeout`,
-/// `:already_running`, `:docker_unavailable`, `:bad_env`. Stop:
-/// `:not_running`, `:timeout`, `:docker_unavailable`.
+/// `:already_running`, `:docker_unavailable`, `:bad_env`, `:bad_port`.
+/// Stop: `:not_running`, `:timeout`, `:docker_unavailable`.
 const REASON_TIMEOUT: &str = "timeout";
 const REASON_ALREADY_RUNNING: &str = "already_running";
 const REASON_NOT_RUNNING: &str = "not_running";
 const REASON_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
 const REASON_BAD_ENV: &str = "bad_env";
+const REASON_BAD_PORT: &str = "bad_port";
 
 /// Label every container we create so a future startup sweep (not yet
 /// implemented — see ROADMAP "Docker optimizations → zombies") can find and
@@ -92,8 +93,11 @@ pub struct Running {
     /// drops this field before teardown runs still cleans up.
     container: ContainerAsync<GenericImage>,
     /// Container port the user asked us to expose (for `get_host_port_ipv4`).
+    /// Retained for a future `port` member-var getter on running actors.
+    #[allow(dead_code)]
     exposed_port: Option<u16>,
-    /// Resolved host port (0 when `port:` was not set).
+    /// Resolved host port (0 when `port:` was not set). Same future use.
+    #[allow(dead_code)]
     host_port: u16,
 }
 
@@ -229,7 +233,18 @@ impl Stopped {
         // ContainerRequest), so port exposure has to be applied before the
         // `.into()` conversion. ImageExt methods (label, env, timeout) all
         // work on the ContainerRequest afterwards.
-        let exposed_port = port_kw.and_then(value_as_u16);
+        //
+        // If `port:` was supplied but didn't parse as a u16, surface
+        // `:bad_port` rather than silently starting the container with no
+        // port exposed — the user asked for something and we couldn't
+        // deliver it, so failure is less surprising than success.
+        let exposed_port = match port_kw {
+            Some(v) => match value_as_u16(v) {
+                Some(p) => Some(p),
+                None => return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT)),
+            },
+            None => None,
+        };
         let mut image = GenericImage::new(image_name, image_tag);
         if let Some(p) = exposed_port {
             image = image.with_exposed_port(p.tcp());
@@ -302,6 +317,15 @@ impl Running {
     }
 
     /// Tear down via the user's explicit `stop` command.
+    ///
+    /// Note: all three outcomes transition the actor back to `Stopped`,
+    /// even when `rm()` errors or times out. That's intentional — the
+    /// state machine tracks what we *attempted*, not what the docker
+    /// daemon acknowledged. On a failed `rm` the container may still be
+    /// alive on the daemon, but from the test's perspective we're done
+    /// with it; a retry of `stop` would return `:not_running` rather
+    /// than re-attempting the `rm`. Orphan cleanup is the responsibility
+    /// of the future label-sweep (see ROADMAP "Docker optimizations").
     async fn stop(self) -> (ContainerMode, RunOutcome) {
         match tokio::time::timeout(TEARDOWN_TIMEOUT, self.container.rm()).await {
             Ok(Ok(_)) => (
@@ -406,15 +430,6 @@ impl ActorInstance for ContainerInstance {
     }
 }
 
-// Silence the "field never read" warning on `host_port` and `exposed_port`.
-// Both are maintained for diagnostics / future use (e.g. a `port` getter on
-// the stopped→running transition for assertions like `assert running.port`
-// via member-var access — see roadmap).
-#[allow(dead_code)]
-fn _touch(r: &Running) -> (Option<u16>, u16) {
-    (r.exposed_port, r.host_port)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,16 +484,6 @@ mod tests {
         assert_eq!(value_as_u16(&Value::Number(70_000)), None);
         assert_eq!(value_as_u16(&Value::String("80".into())), None);
     }
-
-    // ── Docker-gated tests ─────────────────────────────────────────────────
-    //
-    // These hit a live Docker daemon. They are `#[ignore]` by default so
-    // `cargo test` stays offline-friendly. Run locally with:
-    //
-    //     cargo test -p ill-core --lib container -- --ignored
-    //
-    // and expect each test to take multiple seconds (first run pulls the
-    // base images; subsequent runs hit the daemon cache).
 
     // ── Docker-gated tests ─────────────────────────────────────────────────
     //
@@ -619,6 +624,30 @@ mod tests {
             )
             .await;
         assert_container_reason(&outcome, "bad_env");
+        assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn bad_port_returns_bad_port_atom() {
+        let mut inst = ContainerInstance::construct(&image_args("alpine:3.19"))
+            .await
+            .ok()
+            .expect("construct failed");
+        let mut kw = BTreeMap::new();
+        // Out of u16 range — should surface `:bad_port`, not silently start
+        // the container with no port exposed.
+        kw.insert("port".into(), Value::Number(70_000));
+        let outcome = inst
+            .execute(
+                "run",
+                &CommandArgs {
+                    positional: Vec::new(),
+                    keyword: kw,
+                },
+            )
+            .await;
+        assert_container_reason(&outcome, "bad_port");
         assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
     }
 
