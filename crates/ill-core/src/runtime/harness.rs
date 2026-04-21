@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::actor_type::ActorInstance;
 use crate::ast::{
-    ActorDeclaration, AsBlock, Command as CommandAst, KeywordArg, KeywordValue, Let, LetValue,
-    SourceFile, Statement, TopLevel,
+    ActorDeclaration, AsBlock, Command as CommandAst, Expr, KeywordArg, KeywordValue, Let,
+    LetValue, SourceFile, Statement, TopLevel,
 };
 use crate::diagnostic::Severity;
 use crate::registry::Registry;
@@ -292,15 +292,24 @@ fn eval_keyword_args(
             KeywordValue::Map(pairs) => {
                 let mut rec = BTreeMap::new();
                 for (k_expr, v_expr) in pairs {
-                    let key = match eval(k_expr, scope)? {
-                        Value::String(s) => s,
-                        Value::Atom(a) => a,
-                        other => {
-                            return Err(RuntimeError::Eval(format!(
-                                "map key must be string or atom, got {}",
-                                other.type_name()
-                            )));
-                        }
+                    // Bare identifier keys (e.g. `NGINX_HOST:` inside an
+                    // `env:` block) are taken as literal key names rather
+                    // than scope lookups — that's the established pattern
+                    // for env vars across the example suite. String literals
+                    // (e.g. `"Content-Type":` in `headers:`) are evaluated
+                    // so that interpolation still works.
+                    let key = match k_expr {
+                        Expr::Ident(ident) => ident.name.clone(),
+                        other_expr => match eval(other_expr, scope)? {
+                            Value::String(s) => s,
+                            Value::Atom(a) => a,
+                            other => {
+                                return Err(RuntimeError::Eval(format!(
+                                    "map key must be identifier, string, or atom, got {}",
+                                    other.type_name()
+                                )));
+                            }
+                        },
                     };
                     let value = eval(v_expr, scope)?;
                     rec.insert(key, value);
