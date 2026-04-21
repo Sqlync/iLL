@@ -53,6 +53,7 @@ pub fn same_mode(a: &dyn Mode, b: &dyn Mode) -> bool {
 pub enum ValueType {
     String,
     Number,
+    Float,
     Bool,
     Atom,
     Bytes,

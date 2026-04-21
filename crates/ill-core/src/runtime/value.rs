@@ -1,6 +1,8 @@
 // Runtime values. Mirrors `ValueType` 1:1 plus `Dict` (for `ok.*` /
-// `error.*` / struct-shaped kwargs) and `Unit` (for values not yet available,
-// e.g. `ok.exit` before process teardown).
+// `error.*` / struct-shaped kwargs), `Unit` (for values not yet available,
+// e.g. `ok.exit` before process teardown), and `Null` (for SQL NULLs and
+// other "absent" values surfaced from external systems — distinct from
+// `Unit`, which is "not yet computed").
 //
 // `Dict` is an `IndexMap` so field iteration follows insertion order. That
 // matters for positional access like `ok.col[0]` on query results, where the
@@ -22,11 +24,15 @@ pub type Dict = IndexMap<String, Value>;
 pub enum Value {
     String(String),
     Number(i64),
+    Float(f64),
     Bool(bool),
     Atom(String),
     Bytes(Vec<u8>),
     Array(Vec<Value>),
     Dict(Dict),
+    /// SQL NULL / absent value surfaced from external systems. Distinct from
+    /// `Unit` (which means "not yet available", e.g. `ok.exit` before teardown).
+    Null,
     Unit,
 }
 
@@ -35,25 +41,28 @@ impl Value {
         match self {
             Value::String(_) => "string",
             Value::Number(_) => "number",
+            Value::Float(_) => "float",
             Value::Bool(_) => "bool",
             Value::Atom(_) => "atom",
             Value::Bytes(_) => "bytes",
             Value::Array(_) => "array",
             Value::Dict(_) => "dict",
+            Value::Null => "null",
             Value::Unit => "unit",
         }
     }
 
     /// True if this value is a valid inhabitant of `ty`. `Dynamic` and
     /// `Unknown` are permissive (they match any runtime value); every other
-    /// variant is strict. `Array`/`Dict`/`Unit` match no concrete `ValueType`
-    /// — use `Dynamic` to accept them.
+    /// variant is strict. `Array`/`Dict`/`Null`/`Unit` match no concrete
+    /// `ValueType` — use `Dynamic` to accept them.
     pub fn is_of_type(&self, ty: ValueType) -> bool {
         matches!(
             (ty, self),
             (ValueType::Dynamic | ValueType::Unknown, _)
                 | (ValueType::String, Value::String(_))
                 | (ValueType::Number, Value::Number(_))
+                | (ValueType::Float, Value::Float(_))
                 | (ValueType::Bool, Value::Bool(_))
                 | (ValueType::Atom, Value::Atom(_))
                 | (ValueType::Bytes, Value::Bytes(_))
@@ -66,6 +75,7 @@ impl fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "{s:?}"),
             Value::Number(n) => write!(f, "{n}"),
+            Value::Float(x) => write!(f, "{x}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Atom(a) => write!(f, ":{a}"),
             Value::Bytes(b) => write!(f, "<{} bytes>", b.len()),
@@ -89,6 +99,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::Null => write!(f, "null"),
             Value::Unit => write!(f, "()"),
         }
     }

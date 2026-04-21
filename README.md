@@ -24,7 +24,7 @@ Each `.ill` file is a single test. The following "actors" are currently targeted
 | Actor | Description | Examples | Implemented |
 | --- | --- | --- | --- |
 | exec | Shell command | [examples/exec/](examples/exec/) | ✅ |
-| pg_client | Postgres client | [examples/pg_client/](examples/pg_client/) | ⬜ |
+| pg_client | Postgres client | [examples/pg_client/](examples/pg_client/) | ✅ |
 | rest | REST client | [examples/rest/](examples/rest/) | ⬜ |
 | mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | ⬜ |
 | container | Docker container | [examples/container/](examples/container/) | ✅ |

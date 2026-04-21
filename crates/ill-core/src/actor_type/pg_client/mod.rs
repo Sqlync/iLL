@@ -1,13 +1,20 @@
-// The `pg_client` actor type — a postgres client that connects to a database
-// and runs queries.
+// The `pg_client` actor type — a Postgres client that connects to a
+// database and runs queries. Construct is lazy: no network I/O happens
+// at declaration time, so all auth / network failures surface through
+// `error.network.*` / `error.connect.*` on the `connect` command. See
+// `runtime.rs` for the state machine.
 
 pub mod commands;
+pub mod convert;
 pub mod modes;
+pub mod runtime;
 
-use super::{ActorType, Command, Mode};
+use super::{ActorInstance, ActorType, Command, Mode};
+use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct PgClient;
 
+#[async_trait::async_trait]
 impl ActorType for PgClient {
     fn name(&self) -> &'static str {
         "pg_client"
@@ -26,6 +33,14 @@ impl ActorType for PgClient {
         static COMMANDS: &[&dyn Command] =
             &[commands::CONNECT, commands::QUERY, commands::DISCONNECT];
         COMMANDS
+    }
+
+    async fn construct(
+        &self,
+        args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        let inst = runtime::PgClientInstance::construct(args).await?;
+        Ok(Box::new(inst))
     }
 }
 

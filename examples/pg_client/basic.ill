@@ -29,7 +29,7 @@ as alice:
   # "error" catches expected failures and allows assertions
   # we aren't using a ~sql sigil, because we don't want to evaluate the statement
   query "SELEC invalid"
-  assert error.pg.reason == :syntax_error
+  assert error.query.reason == :syntax_error
 
   # "ok" refers to the result of a successful command
   query ~sql`SELECT * FROM users WHERE id = 1`

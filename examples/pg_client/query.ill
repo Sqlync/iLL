@@ -54,4 +54,4 @@ as alice:
   # expected errors
   # note: we are not using a ~sql sigil, because we don't want to evaluate the statement
   query "SELEC invalid"
-  assert error.pg.reason == :syntax_error
+  assert error.query.reason == :syntax_error

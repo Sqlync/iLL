@@ -82,4 +82,4 @@ as alice:
 
   # --- assertions on errors ---
   query "SELEC invalid syntax here"
-  assert error.pg.reason == :syntax_error
+  assert error.query.reason == :syntax_error
