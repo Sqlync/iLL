@@ -27,7 +27,7 @@ Each `.ill` file is a single test. The following "actors" are currently targeted
 | pg_client | Postgres client | [examples/pg_client/](examples/pg_client/) | ⬜ |
 | rest | REST client | [examples/rest/](examples/rest/) | ⬜ |
 | mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | ⬜ |
-| container | Docker container | [examples/container/](examples/container/) | ⬜ |
+| container | Docker container | [examples/container/](examples/container/) | ✅ |
 | args | Command-line arguments | [examples/built-in/args.ill](examples/built-in/args.ill) | ⬜ |
 
 Some language specific dockerfile examples are available at [examples/container/languages/](examples/container/languages/) or you could just run with the exec actor. More concrete examples to come on this.
