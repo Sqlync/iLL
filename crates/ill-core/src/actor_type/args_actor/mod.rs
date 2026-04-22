@@ -2,7 +2,10 @@
 //
 // Single mode; `check` validates self.* invariants via following `assert`s.
 
-use crate::actor_type::{ActorType, Command, Mode};
+pub mod runtime;
+
+use crate::actor_type::{ActorInstance, ActorType, Command, Mode};
+use crate::runtime::{ConstructArgs, RuntimeError};
 
 pub struct Ready;
 impl Mode for Ready {
@@ -29,6 +32,7 @@ pub static CHECK: &dyn Command = &Check;
 
 pub struct ArgsActor;
 
+#[async_trait::async_trait]
 impl ActorType for ArgsActor {
     fn name(&self) -> &'static str {
         "args_actor"
@@ -46,6 +50,13 @@ impl ActorType for ArgsActor {
     fn commands(&self) -> &'static [&'static dyn Command] {
         static COMMANDS: &[&dyn Command] = &[CHECK];
         COMMANDS
+    }
+
+    async fn construct(
+        &self,
+        args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        Ok(Box::new(runtime::ArgsActorInstance::construct(args)?))
     }
 }
 

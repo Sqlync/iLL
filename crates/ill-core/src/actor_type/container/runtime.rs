@@ -497,6 +497,7 @@ mod tests {
         ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         }
     }
 
@@ -662,6 +663,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: kw,
             source_dir: dir.clone(),
+            ..Default::default()
         };
 
         let mut inst = ContainerInstance::construct(&args)
@@ -685,6 +687,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         };
         let msg = expect_construct_err(ContainerInstance::construct(&args).await);
         assert!(
@@ -702,6 +705,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         };
         let _msg = expect_construct_err(ContainerInstance::construct(&args).await);
     }
@@ -711,6 +715,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: Dict::new(),
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         };
         let _msg = expect_construct_err(ContainerInstance::construct(&args).await);
     }

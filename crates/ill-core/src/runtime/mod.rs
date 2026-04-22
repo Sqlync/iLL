@@ -18,9 +18,30 @@ pub mod sigil;
 
 /// Keyword arguments evaluated at an actor declaration site, plus the
 /// directory containing the .ill file (used to resolve relative paths).
+///
+/// `vars` is the actor's declared member-variable list, in source order.
+/// Each entry carries its name and its default value (already evaluated
+/// against an empty scope, so defaults may not reference `self` or other
+/// actors). `None` means the variable was declared without a default and
+/// is therefore required. Actors that don't use declaration-site vars
+/// (exec, container, …) can ignore it.
+///
+/// `cli_args` holds the `--arg KEY=VALUE` entries passed to `ill test`,
+/// left as raw strings. Coercion to declared types is the consuming
+/// actor's responsibility (see `args_actor`).
+#[derive(Default)]
 pub struct ConstructArgs {
     pub keyword: Dict,
     pub source_dir: PathBuf,
+    pub vars: Vec<DeclaredVar>,
+    pub cli_args: std::collections::BTreeMap<String, String>,
+}
+
+/// A single member variable declared on an actor, with its default already
+/// evaluated to a runtime value (if it had one).
+pub struct DeclaredVar {
+    pub name: String,
+    pub default: Option<Value>,
 }
 
 /// Arguments passed to a command invocation. Positional + keyword.

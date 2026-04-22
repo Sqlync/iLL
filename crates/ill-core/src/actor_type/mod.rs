@@ -13,7 +13,7 @@
 
 use std::any::Any;
 
-use crate::runtime::{CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome};
+use crate::runtime::{CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome};
 
 pub mod args_actor;
 pub mod container;
@@ -207,6 +207,15 @@ pub trait ActorInstance: Send {
     /// Release any resources held by the instance. Called in reverse
     /// construction order. Idempotent — safe to call more than once.
     async fn teardown(&mut self) -> TeardownOutcome;
+
+    /// Snapshot of the actor's member variables, used to bind `self` inside
+    /// `as` blocks. The harness calls this before each statement, so
+    /// mutations made by one command are visible to the asserts that follow.
+    /// Default is `None` — actors without user-visible state opt out and
+    /// `self.*` accesses error as undefined.
+    fn self_view(&self) -> Option<Dict> {
+        None
+    }
 }
 
 #[cfg(test)]

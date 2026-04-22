@@ -378,7 +378,23 @@ impl<'r> Validator<'r> {
         outcome: CommandOutcome,
     ) -> ValueType {
         match expr {
-            Expr::MemberAccess { .. } => {
+            Expr::MemberAccess {
+                object, property, ..
+            } => {
+                // `self.<field>` resolves against the enclosing actor's
+                // declared vars. Unknown fields fall through to the
+                // generic outcome-chain resolver below, which returns
+                // None for non-ok/error roots → Unknown.
+                if let Expr::Ident(root) = object.as_ref() {
+                    if root.name == "self" {
+                        if let Some(state) = self.actors.get(actor_name) {
+                            if let Some(ty) = state.vars.get(&property.name) {
+                                return *ty;
+                            }
+                        }
+                        return ValueType::Unknown;
+                    }
+                }
                 resolve_outcome_chain(expr, last_ok_fields, last_error_types)
                     .unwrap_or(ValueType::Unknown)
             }
