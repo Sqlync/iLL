@@ -106,6 +106,10 @@ impl<'r> Validator<'r> {
             None,
         );
 
+        // Type comes from the default expression; vars without a default
+        // are `Unknown` to the validator. The runtime mirror of this lives
+        // in `args_actor::runtime` — required-no-default vars become
+        // `String` at construct time. See `DeclaredVar`.
         let mut vars = HashMap::new();
         for var in &decl.vars {
             let ty = var

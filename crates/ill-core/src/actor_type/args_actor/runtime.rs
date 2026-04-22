@@ -29,6 +29,8 @@ impl ArgsActorInstance {
         for var in &args.vars {
             let value = match (args.cli_args.get(&var.name), &var.default) {
                 (Some(raw), Some(default)) => coerce_to(raw, default, &var.name)?,
+                // No default → no known target type, so the value stays as
+                // the raw CLI string. See `DeclaredVar` for the contract.
                 (Some(raw), None) => Value::String(raw.clone()),
                 (None, Some(default)) => default.clone(),
                 (None, None) => {
