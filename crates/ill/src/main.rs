@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -66,8 +67,8 @@ async fn main() {
 
 /// Parse `--arg KEY=VALUE` entries into a map. Duplicate keys error out —
 /// silently picking one would make test runs unpredictable.
-fn parse_cli_args(raw: &[String]) -> Result<std::collections::BTreeMap<String, String>, String> {
-    let mut out = std::collections::BTreeMap::new();
+fn parse_cli_args(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
+    let mut out = BTreeMap::new();
     for item in raw {
         let Some((k, v)) = item.split_once('=') else {
             return Err(format!("--arg `{item}` must be in the form KEY=VALUE"));
@@ -104,7 +105,7 @@ fn resolve_files(paths: &[PathBuf]) -> Vec<PathBuf> {
     all
 }
 
-async fn run_test(paths: &[PathBuf], cli_args: std::collections::BTreeMap<String, String>) {
+async fn run_test(paths: &[PathBuf], cli_args: BTreeMap<String, String>) {
     let files = resolve_files(paths);
 
     if files.is_empty() {

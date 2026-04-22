@@ -1,7 +1,7 @@
 // Runtime half of the `args_actor`. Holds the resolved member variables
 // computed at construct time from declared defaults + `--arg KEY=VALUE`
-// overrides. All members are public read-only; `check` is a no-op command
-// (the following asserts in the `as` block do the real work).
+// overrides. `check` is a no-op; the following asserts in the `as` block
+// do the real work.
 
 use crate::actor_type::ActorInstance;
 use crate::runtime::{
@@ -15,12 +15,10 @@ pub struct ArgsActorInstance {
 
 impl ArgsActorInstance {
     pub fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
-        // Unknown `--arg` keys error loudly rather than silently dropping —
-        // a typo would otherwise look like the default was used.
-        let declared: std::collections::HashSet<&str> =
-            args.vars.iter().map(|v| v.name.as_str()).collect();
+        // A typo in a `--arg` key would otherwise silently fall through to
+        // the default and look like the default was used.
         for key in args.cli_args.keys() {
-            if !declared.contains(key.as_str()) {
+            if !args.vars.iter().any(|v| &v.name == key) {
                 return Err(RuntimeError::Construct(format!(
                     "--arg `{key}` is not a declared var on this args_actor"
                 )));
@@ -49,8 +47,8 @@ impl ArgsActorInstance {
 
 /// Coerce a raw CLI string into the same `Value` variant as `target`. Used
 /// only when a declared var has a default — the default fixes the expected
-/// type. Fails loudly if the raw string can't be parsed; the user said
-/// "error if they do not translate".
+/// type. Non-scalar defaults (dict, array, bytes) can't be overridden from
+/// the command line.
 fn coerce_to(raw: &str, target: &Value, var_name: &str) -> Result<Value, RuntimeError> {
     match target {
         Value::String(_) => Ok(Value::String(raw.to_string())),
@@ -59,13 +57,11 @@ fn coerce_to(raw: &str, target: &Value, var_name: &str) -> Result<Value, Runtime
                 "--arg `{var_name}`: cannot parse `{raw}` as a number"
             ))
         }),
-        Value::Bool(_) => match raw {
-            "true" => Ok(Value::Bool(true)),
-            "false" => Ok(Value::Bool(false)),
-            other => Err(RuntimeError::Construct(format!(
-                "--arg `{var_name}`: expected `true` or `false`, got `{other}`"
-            ))),
-        },
+        Value::Bool(_) => raw.parse::<bool>().map(Value::Bool).map_err(|_| {
+            RuntimeError::Construct(format!(
+                "--arg `{var_name}`: expected `true` or `false`, got `{raw}`"
+            ))
+        }),
         Value::Atom(_) => {
             let atom = raw.strip_prefix(':').unwrap_or(raw);
             Ok(Value::Atom(atom.to_string()))
@@ -85,8 +81,6 @@ impl ActorInstance for ArgsActorInstance {
 
     async fn execute(&mut self, cmd: &'static str, _args: &CommandArgs) -> RunOutcome {
         match cmd {
-            // `check` is a marker — the asserts that follow in the `as` block
-            // do the actual validation.
             "check" => RunOutcome::Ok(Dict::new()),
             other => RunOutcome::NotImplemented {
                 actor: "args_actor",
@@ -109,11 +103,20 @@ mod tests {
     use super::*;
     use crate::runtime::DeclaredVar;
 
-    fn base_args(vars: Vec<DeclaredVar>) -> ConstructArgs {
+    fn args_with(vars: Vec<DeclaredVar>, cli: &[(&str, &str)]) -> ConstructArgs {
+        let cli_args = cli
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect();
         ConstructArgs {
             vars,
+            cli_args,
             ..Default::default()
         }
+    }
+
+    fn base_args(vars: Vec<DeclaredVar>) -> ConstructArgs {
+        args_with(vars, &[])
     }
 
     fn var(name: &str, default: Option<Value>) -> DeclaredVar {
@@ -135,13 +138,7 @@ mod tests {
 
     #[test]
     fn required_uses_cli_override() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("required".into(), "hello".into());
-        let args = ConstructArgs {
-            vars: vec![var("required", None)],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(vec![var("required", None)], &[("required", "hello")]);
         let inst = ArgsActorInstance::construct(&args).unwrap();
         assert_eq!(
             inst.members.get("required"),
@@ -158,77 +155,57 @@ mod tests {
 
     #[test]
     fn number_default_coerces_cli_string() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("n".into(), "42".into());
-        let args = ConstructArgs {
-            vars: vec![var("n", Some(Value::Number(7)))],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(vec![var("n", Some(Value::Number(7)))], &[("n", "42")]);
         let inst = ArgsActorInstance::construct(&args).unwrap();
         assert_eq!(inst.members.get("n"), Some(&Value::Number(42)));
     }
 
     #[test]
     fn number_coercion_failure_errors() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("n".into(), "not-a-number".into());
-        let args = ConstructArgs {
-            vars: vec![var("n", Some(Value::Number(7)))],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(
+            vec![var("n", Some(Value::Number(7)))],
+            &[("n", "not-a-number")],
+        );
         let err = ArgsActorInstance::construct(&args).unwrap_err();
         assert!(matches!(&err, RuntimeError::Construct(m) if m.contains("cannot parse")));
     }
 
     #[test]
     fn bool_coercion() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("flag".into(), "true".into());
-        let args = ConstructArgs {
-            vars: vec![var("flag", Some(Value::Bool(false)))],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(
+            vec![var("flag", Some(Value::Bool(false)))],
+            &[("flag", "true")],
+        );
         let inst = ArgsActorInstance::construct(&args).unwrap();
         assert_eq!(inst.members.get("flag"), Some(&Value::Bool(true)));
     }
 
     #[test]
     fn bool_coercion_failure_errors() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("flag".into(), "yes".into());
-        let args = ConstructArgs {
-            vars: vec![var("flag", Some(Value::Bool(false)))],
-            cli_args: cli,
-            ..Default::default()
-        };
-        assert!(ArgsActorInstance::construct(&args).is_err());
+        let args = args_with(
+            vec![var("flag", Some(Value::Bool(false)))],
+            &[("flag", "yes")],
+        );
+        let err = ArgsActorInstance::construct(&args).unwrap_err();
+        assert!(matches!(&err, RuntimeError::Construct(m) if m.contains("expected `true`")));
     }
 
     #[test]
     fn atom_coercion_strips_colon() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("mode".into(), ":fast".into());
-        let args = ConstructArgs {
-            vars: vec![var("mode", Some(Value::Atom("slow".into())))],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(
+            vec![var("mode", Some(Value::Atom("slow".into())))],
+            &[("mode", ":fast")],
+        );
         let inst = ArgsActorInstance::construct(&args).unwrap();
         assert_eq!(inst.members.get("mode"), Some(&Value::Atom("fast".into())));
     }
 
     #[test]
     fn unknown_cli_arg_errors() {
-        let mut cli = std::collections::BTreeMap::new();
-        cli.insert("nope".into(), "x".into());
-        let args = ConstructArgs {
-            vars: vec![var("opt", Some(Value::String("foo".into())))],
-            cli_args: cli,
-            ..Default::default()
-        };
+        let args = args_with(
+            vec![var("opt", Some(Value::String("foo".into())))],
+            &[("nope", "x")],
+        );
         let err = ArgsActorInstance::construct(&args).unwrap_err();
         assert!(matches!(&err, RuntimeError::Construct(m) if m.contains("not a declared var")));
     }

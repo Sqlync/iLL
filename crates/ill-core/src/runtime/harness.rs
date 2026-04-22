@@ -177,9 +177,6 @@ async fn run_as_block(
         })?;
 
     let mut scope = Scope::new();
-    // `ok` and `error` are bound per-command; start unset.
-    // `self` is refreshed at the top of every statement so any command-driven
-    // mutation of the actor's state is visible to the asserts that follow.
 
     for (idx, stmt) in block.body.iter().enumerate() {
         bind_self(&mut scope, actors, actor_name);
@@ -348,9 +345,11 @@ fn eval_keyword_args(args: &[KeywordArg], scope: &Scope) -> Result<Dict, Runtime
     Ok(out)
 }
 
-/// Refresh the `self` binding in `scope` from the actor's `self_view`. If
-/// the actor doesn't expose state, `self` is unbound — accesses will surface
-/// as "undefined name `self`" at eval time.
+/// Refresh the `self` binding in `scope` from the actor's `self_view`.
+/// Called at the top of every statement so command-driven mutations of
+/// actor state are visible to the asserts that follow. If the actor
+/// doesn't expose state, `self` is unbound and accesses surface as
+/// "undefined name `self`" at eval time.
 fn bind_self(scope: &mut Scope, actors: &InstantiatedActors, actor_name: &str) {
     match actors.get(actor_name).and_then(|i| i.self_view()) {
         Some(dict) => scope.bind("self", Value::Dict(dict)),
