@@ -59,7 +59,8 @@ async fn main() {
                     process::exit(1);
                 }
             };
-            run_test(&paths, cli_args).await;
+            ill_core::actor_type::args_actor::set_cli_args(cli_args);
+            run_test(&paths).await;
         }
         Commands::Check { paths } => run_check(&paths),
     }
@@ -105,7 +106,7 @@ fn resolve_files(paths: &[PathBuf]) -> Vec<PathBuf> {
     all
 }
 
-async fn run_test(paths: &[PathBuf], cli_args: BTreeMap<String, String>) {
+async fn run_test(paths: &[PathBuf]) {
     let files = resolve_files(paths);
 
     if files.is_empty() {
@@ -126,7 +127,7 @@ async fn run_test(paths: &[PathBuf], cli_args: BTreeMap<String, String>) {
             }
         };
 
-        let report = ill_core::runtime::harness::run_test_file(path, &src, &cli_args).await;
+        let report = ill_core::runtime::harness::run_test_file(path, &src).await;
         if report.passed {
             println!("PASS {}", path.display());
             passed += 1;

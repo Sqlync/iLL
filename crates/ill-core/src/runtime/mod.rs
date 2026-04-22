@@ -2,7 +2,6 @@
 // walk `as` blocks in order, dispatching per-actor commands. See the `exec`
 // actor's `runtime.rs` for the first concrete implementation.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod value;
@@ -21,14 +20,12 @@ pub mod sigil;
 /// directory containing the .ill file (used to resolve relative paths).
 ///
 /// `vars` defaults are evaluated against an empty scope — they can't
-/// reference `self` or other actors. `cli_args` are left as raw strings;
-/// coercion is the consuming actor's job (see `args_actor`).
+/// reference `self` or other actors.
 #[derive(Default)]
 pub struct ConstructArgs {
     pub keyword: Dict,
     pub source_dir: PathBuf,
     pub vars: Vec<DeclaredVar>,
-    pub cli_args: BTreeMap<String, String>,
 }
 
 /// A single member variable declared on an actor, with its default already

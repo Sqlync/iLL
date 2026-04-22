@@ -5,7 +5,6 @@
 // second pass walks `as` blocks in source order. This keeps check and run
 // from drifting.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::actor_type::ActorInstance;
@@ -25,11 +24,7 @@ use super::{
 };
 
 /// Run a single .ill test file and return a structured report.
-pub async fn run_test_file(
-    path: &Path,
-    src: &str,
-    cli_args: &BTreeMap<String, String>,
-) -> TestReport {
+pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
     let source_dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -63,15 +58,10 @@ pub async fn run_test_file(
         };
     }
 
-    execute(path, &ast, &source_dir, cli_args).await
+    execute(path, &ast, &source_dir).await
 }
 
-async fn execute(
-    path: &Path,
-    source: &SourceFile,
-    source_dir: &Path,
-    cli_args: &BTreeMap<String, String>,
-) -> TestReport {
+async fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {
     let registry = Registry::global();
     let mut statements: Vec<StatementReport> = Vec::new();
     let mut actors = InstantiatedActors::new();
@@ -83,7 +73,7 @@ async fn execute(
     for item in &source.items {
         match item {
             TopLevel::ActorDeclaration(decl) => {
-                match construct_actor(registry, decl, source_dir, cli_args).await {
+                match construct_actor(registry, decl, source_dir).await {
                     Ok(inst) => actors.push(decl.name.name.clone(), inst),
                     Err(msg) => {
                         statements.push(StatementReport::ConstructFailure {
@@ -118,7 +108,6 @@ async fn construct_actor(
     registry: &Registry,
     decl: &ActorDeclaration,
     source_dir: &Path,
-    cli_args: &BTreeMap<String, String>,
 ) -> Result<Box<dyn ActorInstance>, String> {
     let actor_type = registry
         .get(&decl.actor_type.name)
@@ -143,7 +132,6 @@ async fn construct_actor(
         keyword,
         source_dir: source_dir.to_path_buf(),
         vars,
-        cli_args: cli_args.clone(),
     };
     actor_type.construct(&args).await.map_err(|e| e.to_string())
 }
@@ -465,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn parse_failure_reports_fail() {
-        let report = run_test_file(Path::new("bogus.ill"), "actor !!!!", &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("bogus.ill"), "actor !!!!").await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -475,12 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn validation_failure_reports_fail() {
-        let report = run_test_file(
-            Path::new("bogus.ill"),
-            "actor bob = nope_actor\n",
-            &BTreeMap::new(),
-        )
-        .await;
+        let report = run_test_file(Path::new("bogus.ill"), "actor bob = nope_actor\n").await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -498,7 +481,7 @@ actor server = exec,
 as server:
   run
 ";
-        let report = run_test_file(Path::new("t.ill"), src, &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(report.passed, "statements: {}", report.statements.len());
         assert_eq!(report.teardown.len(), 1);
         assert!(report.teardown[0].outcome.ok);
@@ -516,7 +499,7 @@ as server:
   run
   assert 1 == 2
 ";
-        let report = run_test_file(Path::new("t.ill"), src, &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -535,7 +518,7 @@ actor server = exec,
 as server:
   run
 ";
-        let report = run_test_file(Path::new("t.ill"), src, &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
@@ -556,7 +539,7 @@ as never_runs:
   run
   assert error.exec.reason == :command_not_found
 ";
-        let report = run_test_file(Path::new("t.ill"), src, &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(
             report.passed,
             "expected pass, got {} statement(s)",
@@ -577,7 +560,7 @@ as never_runs:
   run
   assert error.exec.reason == :permission_denied
 ";
-        let report = run_test_file(Path::new("t.ill"), src, &BTreeMap::new()).await;
+        let report = run_test_file(Path::new("t.ill"), src).await;
         assert!(!report.passed);
         assert!(matches!(
             report.statements.first(),
