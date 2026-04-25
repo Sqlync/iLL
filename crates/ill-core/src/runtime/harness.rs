@@ -19,7 +19,9 @@ use crate::validate::expr_starts_with_ident;
 use super::assert::eval_assert;
 use super::eval::{eval, Scope};
 use super::report::{StatementReport, TeardownReport, TestReport};
-use super::{CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value};
+use super::{
+    CommandArgs, ConstructArgs, DeclaredVar, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value,
+};
 
 /// Run a single .ill test file and return a structured report.
 pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
@@ -114,9 +116,22 @@ async fn construct_actor(
     let empty = Scope::new();
     let keyword = eval_keyword_args(&decl.keyword_args, &empty).map_err(|e| e.to_string())?;
 
+    let mut vars = Vec::with_capacity(decl.vars.len());
+    for var in &decl.vars {
+        let default = match &var.default {
+            Some(expr) => Some(eval(expr, &empty).map_err(|e| e.to_string())?),
+            None => None,
+        };
+        vars.push(DeclaredVar {
+            name: var.name.name.clone(),
+            default,
+        });
+    }
+
     let args = ConstructArgs {
         keyword,
         source_dir: source_dir.to_path_buf(),
+        vars,
     };
     actor_type.construct(&args).await.map_err(|e| e.to_string())
 }
@@ -150,9 +165,9 @@ async fn run_as_block(
         })?;
 
     let mut scope = Scope::new();
-    // `ok` and `error` are bound per-command; start unset.
 
     for (idx, stmt) in block.body.iter().enumerate() {
+        bind_self(&mut scope, actors, actor_name);
         match stmt {
             Statement::Command(cmd) => {
                 scope.unbind("ok");
@@ -316,6 +331,18 @@ fn eval_keyword_args(args: &[KeywordArg], scope: &Scope) -> Result<Dict, Runtime
         out.insert(kw.key.name.clone(), v);
     }
     Ok(out)
+}
+
+/// Refresh the `self` binding in `scope` from the actor's `self_view`.
+/// Called at the top of every statement so command-driven mutations of
+/// actor state are visible to the asserts that follow. If the actor
+/// doesn't expose state, `self` is unbound and accesses surface as
+/// "undefined name `self`" at eval time.
+fn bind_self(scope: &mut Scope, actors: &InstantiatedActors, actor_name: &str) {
+    match actors.get(actor_name).and_then(|i| i.self_view()) {
+        Some(dict) => scope.bind("self", Value::Dict(dict)),
+        None => scope.unbind("self"),
+    }
 }
 
 /// Assemble the scope-visible `error` dict from a `RunOutcome::Error`.

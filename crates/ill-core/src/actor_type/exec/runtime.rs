@@ -289,6 +289,7 @@ mod tests {
         ConstructArgs {
             keyword: kw,
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         }
     }
 
@@ -304,6 +305,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: Dict::new(),
             source_dir: std::env::temp_dir(),
+            ..Default::default()
         };
         let err = match ExecInstance::construct(&args) {
             Ok(_) => panic!("expected error"),
@@ -417,6 +419,7 @@ mod tests {
         let args = ConstructArgs {
             keyword: kw,
             source_dir: dir.clone(),
+            ..Default::default()
         };
         let mut inst = ExecInstance::construct(&args).unwrap();
         let outcome = inst.execute("run", &empty_args()).await;

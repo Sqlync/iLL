@@ -18,9 +18,28 @@ pub mod sigil;
 
 /// Keyword arguments evaluated at an actor declaration site, plus the
 /// directory containing the .ill file (used to resolve relative paths).
+///
+/// `vars` defaults are evaluated against an empty scope — they can't
+/// reference `self` or other actors.
+#[derive(Default)]
 pub struct ConstructArgs {
     pub keyword: Dict,
     pub source_dir: PathBuf,
+    pub vars: Vec<DeclaredVar>,
+}
+
+/// A single member variable declared on an actor, with its default already
+/// evaluated to a runtime value. `None` means the var has no default and
+/// is therefore required from the CLI.
+///
+/// No standalone type annotation: the default's `Value` variant is the
+/// only source of expected type for coercion. A var without a default is
+/// typed as `String` at runtime and `ValueType::Unknown` to the validator.
+/// When/if var type annotations are added to the grammar, extend this
+/// struct with an explicit `ty` and drive coercion from it instead.
+pub struct DeclaredVar {
+    pub name: String,
+    pub default: Option<Value>,
 }
 
 /// Arguments passed to a command invocation. Positional + keyword.

@@ -43,6 +43,9 @@ End-to-end vertical slice with the simplest actor: run a command on the host, ca
 In any order
 
 - [x] Handle intentionally failing exec actor
+- [ ] Actor member variables
+  - [ ] visibility
+  - [ ] mutability
 - [ ] Built-in actors (assert, env, etc.)
 - [ ] Container (image/dockerfile, run, lifecycle, shell)
 - [ ] Postgres (start/stop, client, queries)

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -29,6 +30,10 @@ enum Commands {
     Test {
         /// Files or directories to test. Defaults to the current directory.
         paths: Vec<PathBuf>,
+        /// Supply a command-line argument to the `args_actor` in the form
+        /// `KEY=VALUE`. Repeat for multiple values.
+        #[arg(long = "arg", value_name = "KEY=VALUE")]
+        args: Vec<String>,
     },
     /// Check .ill files for errors without running them.
     ///
@@ -46,9 +51,38 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Test { paths } => run_test(&paths).await,
+        Commands::Test { paths, args } => {
+            let cli_args = match parse_cli_args(&args) {
+                Ok(m) => m,
+                Err(msg) => {
+                    eprintln!("ill: {msg}");
+                    process::exit(1);
+                }
+            };
+            ill_core::actor_type::args_actor::set_cli_args(cli_args);
+            run_test(&paths).await;
+        }
         Commands::Check { paths } => run_check(&paths),
     }
+}
+
+/// Parse `--arg KEY=VALUE` entries into a map. Duplicate keys error out —
+/// silently picking one would make test runs unpredictable.
+fn parse_cli_args(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
+    let mut out = BTreeMap::new();
+    for item in raw {
+        let Some((k, v)) = item.split_once('=') else {
+            return Err(format!("--arg `{item}` must be in the form KEY=VALUE"));
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            return Err(format!("--arg `{item}` has an empty key"));
+        }
+        if out.insert(key.to_string(), v.to_string()).is_some() {
+            return Err(format!("--arg `{key}` specified more than once"));
+        }
+    }
+    Ok(out)
 }
 
 /// Resolve a list of user-supplied paths into a sorted list of .ill files.
