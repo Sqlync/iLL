@@ -333,12 +333,23 @@ fn eval_keyword_args(args: &[KeywordArg], scope: &Scope) -> Result<Dict, Runtime
     Ok(out)
 }
 
-/// Refresh the `self` binding in `scope` from the actor's `self_view`.
-/// Called at the top of every statement so command-driven mutations of
-/// actor state are visible to the asserts that follow. If the actor
-/// doesn't expose state, `self` is unbound and accesses surface as
-/// "undefined name `self`" at eval time.
+/// Refresh actor-state bindings in `scope`. Called at the top of every
+/// statement so command-driven mutations are visible to the statements
+/// that follow.
+///
+/// Every constructed actor's `self_view` is bound under its declared
+/// name, so cross-actor reads (`<other>.<field>`, e.g. `db.port`)
+/// resolve through normal `MemberAccess`. The current actor is also
+/// bound as `self` for the shorthand form. Actors that don't expose
+/// state (`self_view() == None`) have their name unbound, so accesses
+/// surface as "undefined name" at eval time.
 fn bind_self(scope: &mut Scope, actors: &InstantiatedActors, actor_name: &str) {
+    for (name, inst) in actors.entries() {
+        match inst.self_view() {
+            Some(dict) => scope.bind(name.clone(), Value::Dict(dict)),
+            None => scope.unbind(name),
+        }
+    }
     match actors.get(actor_name).and_then(|i| i.self_view()) {
         Some(dict) => scope.bind("self", Value::Dict(dict)),
         None => scope.unbind("self"),
@@ -413,6 +424,13 @@ impl InstantiatedActors {
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, i)| i.as_ref())
+    }
+
+    /// Borrow every (name, instance) pair in construction order. Used by
+    /// `bind_self` to expose every actor's `self_view` in scope under its
+    /// own name for cross-actor reads.
+    fn entries(&self) -> impl Iterator<Item = (&String, &dyn ActorInstance)> {
+        self.entries.iter().map(|(n, i)| (n, i.as_ref()))
     }
 
     fn get_mut(&mut self, name: &str) -> Option<&mut dyn ActorInstance> {
@@ -566,5 +584,31 @@ as never_runs:
             report.statements.first(),
             Some(StatementReport::AssertFailure { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn cross_actor_member_var_resolves_in_assert() {
+        // `args_actor` has a no-op `check` command and exposes its declared
+        // vars via `self_view`. Two actors in scope; from inside `as a:` we
+        // read `b.name` and confirm it resolves to b's declared default.
+        let src = "\
+actor a = args_actor,
+  vars:
+    name: \"alice\"
+actor b = args_actor,
+  vars:
+    name: \"bob\"
+
+as a:
+  check
+  assert b.name == \"bob\"
+  assert self.name == \"alice\"
+";
+        let report = run_test_file(Path::new("t.ill"), src).await;
+        assert!(
+            report.passed,
+            "expected pass, got {} failed statement(s)",
+            report.statements.len()
+        );
     }
 }

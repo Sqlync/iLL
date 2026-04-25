@@ -21,7 +21,7 @@ use testcontainers::{
 use super::commands::{ContainerError, RunOk};
 use crate::actor_type::ActorInstance;
 use crate::runtime::{
-    CommandArgs, ConstructArgs, RunOutcome, RuntimeError, TeardownOutcome, Value,
+    CommandArgs, ConstructArgs, DeclaredVar, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value,
 };
 
 /// Reason atoms surfaced on `error.container.reason`. Run: `:timeout`,
@@ -71,6 +71,11 @@ pub struct ContainerInstance {
     image_name: String,
     image_tag: String,
     mode: ContainerMode,
+    /// Member variables surfaced by `self_view`. Seeded from `args.vars` at
+    /// construct time. After a successful `run`, the `port` entry (if
+    /// declared) is overwritten with the live host port testcontainers
+    /// mapped — that's what other actors read via `<container>.port`.
+    members: Dict,
 }
 
 pub enum ContainerMode {
@@ -102,7 +107,7 @@ impl ContainerInstance {
         let image_kw = args.kw("image");
         let dockerfile_kw = args.kw("dockerfile");
 
-        match (image_kw, dockerfile_kw) {
+        let mut instance = match (image_kw, dockerfile_kw) {
             (Some(_), Some(_)) => Err(RuntimeError::Construct(
                 "container requires exactly one of `image:` or `dockerfile:`, not both".to_string(),
             )),
@@ -129,7 +134,9 @@ impl ContainerInstance {
                     context: "container `dockerfile`".into(),
                 }),
             },
-        }
+        }?;
+        instance.members = build_members(&args.vars);
+        Ok(instance)
     }
 }
 
@@ -148,6 +155,7 @@ async fn prepare_from_image(image_ref: &str) -> Result<ContainerInstance, Runtim
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
+        members: Dict::new(),
     })
 }
 
@@ -181,6 +189,7 @@ async fn prepare_from_dockerfile(
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
+        members: Dict::new(),
     })
 }
 
@@ -363,6 +372,17 @@ fn value_as_u16(v: &Value) -> Option<u16> {
     }
 }
 
+/// Build the initial member-var dict from the actor declaration. Vars
+/// without a default surface as `Value::Unit` so `self.<name>` resolves
+/// to "not yet set" rather than failing the lookup outright.
+fn build_members(vars: &[DeclaredVar]) -> Dict {
+    let mut out = Dict::new();
+    for v in vars {
+        out.insert(v.name.clone(), v.default.clone().unwrap_or(Value::Unit));
+    }
+    out
+}
+
 #[async_trait::async_trait]
 impl ActorInstance for ContainerInstance {
     fn type_name(&self) -> &'static str {
@@ -403,6 +423,19 @@ impl ActorInstance for ContainerInstance {
                 ),
             },
         };
+        // Backfill the live host port into `self.port` so other actors that
+        // read `<container>.port` get the dynamically-mapped value, not the
+        // declared one. Only overwrites a `port` member that was actually
+        // declared on the actor — silent on actors without a `port` var.
+        if cmd == "run" {
+            if let RunOutcome::Ok(ref ok) = outcome {
+                if let Some(Value::Number(p)) = ok.get("port") {
+                    if *p > 0 && self.members.contains_key("port") {
+                        self.members.insert("port".into(), Value::Number(*p));
+                    }
+                }
+            }
+        }
         self.mode = next;
         outcome
     }
@@ -414,6 +447,10 @@ impl ActorInstance for ContainerInstance {
         };
         self.mode = next;
         outcome
+    }
+
+    fn self_view(&self) -> Option<Dict> {
+        Some(self.members.clone())
     }
 }
 
@@ -470,6 +507,23 @@ mod tests {
         assert_eq!(value_as_u16(&Value::Number(-1)), None);
         assert_eq!(value_as_u16(&Value::Number(70_000)), None);
         assert_eq!(value_as_u16(&Value::String("80".into())), None);
+    }
+
+    #[test]
+    fn build_members_seeds_defaults_and_marks_undefaulted_as_unit() {
+        let vars = vec![
+            DeclaredVar {
+                name: "port".into(),
+                default: Some(Value::Number(8080)),
+            },
+            DeclaredVar {
+                name: "name".into(),
+                default: None,
+            },
+        ];
+        let m = build_members(&vars);
+        assert_eq!(m.get("port"), Some(&Value::Number(8080)));
+        assert_eq!(m.get("name"), Some(&Value::Unit));
     }
 
     // ── Docker-gated tests ─────────────────────────────────────────────────
@@ -555,6 +609,68 @@ mod tests {
         let td = inst.teardown().await;
         assert!(td.ok, "teardown failed: {:?}", td.message);
         assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn run_backfills_port_member_with_mapped_host_port() {
+        // Postgres exposes 5432 inside the container; testcontainers maps
+        // that to a random host port. After `run`, `self_view().port` must
+        // be that host port, not the declared 5432 — that's the value
+        // other actors connect to via `<container>.port`.
+        let mut kw = Dict::new();
+        kw.insert("image".into(), Value::String("postgres:18".into()));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+            vars: vec![DeclaredVar {
+                name: "port".into(),
+                default: Some(Value::Number(5432)),
+            }],
+        };
+        let mut inst = ContainerInstance::construct(&args)
+            .await
+            .ok()
+            .expect("construct failed");
+
+        // Pre-run: self_view sees the declared default.
+        let pre = inst.self_view().expect("self_view populated");
+        assert_eq!(pre.get("port"), Some(&Value::Number(5432)));
+
+        // Postgres needs a password to start.
+        let mut env = Dict::new();
+        env.insert("POSTGRES_PASSWORD".into(), Value::String("pw".into()));
+        let mut run_kw = Dict::new();
+        run_kw.insert("port".into(), Value::Number(5432));
+        run_kw.insert("env".into(), Value::Dict(env));
+        let outcome = inst
+            .execute(
+                "run",
+                &CommandArgs {
+                    positional: Vec::new(),
+                    keyword: run_kw,
+                },
+            )
+            .await;
+        let mapped = match outcome {
+            RunOutcome::Ok(fields) => match fields.get("port") {
+                Some(Value::Number(p)) => *p,
+                other => panic!("expected ok.port number, got {other:?}"),
+            },
+            other => panic!("expected Ok from run, got {other:?}", other = match other {
+                RunOutcome::Error { variant, fields } => format!("Error({variant}, {fields:?})"),
+                RunOutcome::NotImplemented { actor, cmd } => format!("NotImplemented({actor}, {cmd})"),
+                RunOutcome::Ok(_) => unreachable!(),
+            }),
+        };
+        assert!(mapped > 0, "host port should be > 0");
+        assert_ne!(mapped, 5432, "host port should differ from container port");
+
+        // Post-run: self_view reflects the mapped host port.
+        let post = inst.self_view().expect("self_view populated");
+        assert_eq!(post.get("port"), Some(&Value::Number(mapped)));
+
+        let _ = inst.teardown().await;
     }
 
     #[tokio::test]
