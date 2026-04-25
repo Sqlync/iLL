@@ -657,11 +657,16 @@ mod tests {
                 Some(Value::Number(p)) => *p,
                 other => panic!("expected ok.port number, got {other:?}"),
             },
-            other => panic!("expected Ok from run, got {other:?}", other = match other {
-                RunOutcome::Error { variant, fields } => format!("Error({variant}, {fields:?})"),
-                RunOutcome::NotImplemented { actor, cmd } => format!("NotImplemented({actor}, {cmd})"),
-                RunOutcome::Ok(_) => unreachable!(),
-            }),
+            other => panic!(
+                "expected Ok from run, got {other:?}",
+                other = match other {
+                    RunOutcome::Error { variant, fields } =>
+                        format!("Error({variant}, {fields:?})"),
+                    RunOutcome::NotImplemented { actor, cmd } =>
+                        format!("NotImplemented({actor}, {cmd})"),
+                    RunOutcome::Ok(_) => unreachable!(),
+                }
+            ),
         };
         assert!(mapped > 0, "host port should be > 0");
         assert_ne!(mapped, 5432, "host port should differ from container port");

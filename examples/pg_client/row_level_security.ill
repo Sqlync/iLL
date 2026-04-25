@@ -49,7 +49,7 @@ as alice:
   # alice can see her own message
   query ~sql`SELECT * FROM messages`
   assert ok.row_count == 1
-  assert ok.row[0] == [1, "alice", "secret from alice"]
+  assert ok.cell[0] == [1, "alice", "secret from alice"]
 
 # bob inserts a message
 as bob:
@@ -64,17 +64,17 @@ as bob:
   # bob can only see his own message, not alice's
   query ~sql`SELECT * FROM messages`
   assert ok.row_count == 1
-  assert ok.row[0] == [2, "bob", "secret from bob"]
+  assert ok.cell[0] == [2, "bob", "secret from bob"]
 
 # alice still only sees her own message
 as alice:
   query ~sql`SELECT * FROM messages`
   assert ok.row_count == 1
-  assert ok.row[0] == [1, "alice", "secret from alice"]
+  assert ok.cell[0] == [1, "alice", "secret from alice"]
 
 # admin (table owner) can see all rows
 as admin:
   query ~sql`SELECT * FROM messages ORDER BY id`
   assert ok.row_count == 2
-  assert ok.row[0] == [1, "alice", "secret from alice"]
-  assert ok.row[1] == [2, "bob", "secret from bob"]
+  assert ok.cell[0] == [1, "alice", "secret from alice"]
+  assert ok.cell[1] == [2, "bob", "secret from bob"]

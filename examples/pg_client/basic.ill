@@ -33,12 +33,12 @@ as alice:
 
   # "ok" refers to the result of a successful command
   query ~sql`SELECT * FROM users WHERE id = 1`
-  assert ok.row[0] == [1, "alice"]
+  assert ok.cell[0] == [1, "alice"]
 
   # check multiple rows
   query ~sql`SELECT * FROM users ORDER BY id`
-  assert ok.row[0] == [1, "alice"]
-  assert ok.row[1] == [2, "bob"]
+  assert ok.cell[0] == [1, "alice"]
+  assert ok.cell[1] == [2, "bob"]
 
   # check result set shape
   assert ok.row_count == 2
@@ -57,9 +57,9 @@ as alice:
   let alice_id = ok.cell[0, 0]
 
   query ~sql`SELECT * FROM users WHERE id = ${alice_id}`
-  assert ok.row[0] == [1, "alice"]
+  assert ok.cell[0] == [1, "alice"]
 
   # some args are optional
   query ~sql`SELECT * FROM users WHERE id = ${alice_id}`,
     timeout: 5000
-  assert ok.row[0] == [1, "alice"]
+  assert ok.cell[0] == [1, "alice"]

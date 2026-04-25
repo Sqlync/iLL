@@ -7,11 +7,11 @@ use crate::define_outcome;
 // ── Outcome shapes ────────────────────────────────────────────────────────────
 //
 // `Connect` and `Query` declare structured results that assertions address as
-// `ok.is_connected`, `ok.row[0]`, `ok.col["name"]`, `ok.cell[i, j]`,
-// `ok.row_count`, `ok.col_count`. Row / column / cell structures carry
-// heterogeneous cell values and go through as `Dynamic` — the validator can't
-// reason about their inner shape, but `assert ok.row[0] == [1, "alice"]` is
-// resolved by the runtime's indexing.
+// `ok.is_connected`, `ok.cell[i]` / `ok.cell[i, j]`, `ok.col["name"]`,
+// `ok.row_count`, `ok.col_count`. The cell / column structures carry
+// heterogeneous values and go through as `Dynamic` — the validator can't
+// reason about their inner shape, but `assert ok.cell[0] == [1, "alice"]`
+// resolves through the runtime's indexing.
 
 define_outcome! {
     /// Result of `pg_client.connect`. `is_connected` is always `true` on the
@@ -166,19 +166,15 @@ impl Command for Query {
     fn ok_fields(&self) -> &'static [OutcomeField] {
         // Declared `Dynamic` because the inner structure is row-shaped and
         // cell-typed at runtime; the validator does not reason about cell
-        // types. Assertions like `ok.row[0] == [1, "alice"]` resolve through
+        // types. Assertions like `ok.cell[0] == [1, "alice"]` resolve through
         // eval's indexing over the Array/Dict the runtime produces.
         const FIELDS: &[OutcomeField] = &[
             OutcomeField {
-                name: "row",
+                name: "cell",
                 ty: ValueType::Dynamic,
             },
             OutcomeField {
                 name: "col",
-                ty: ValueType::Dynamic,
-            },
-            OutcomeField {
-                name: "cell",
                 ty: ValueType::Dynamic,
             },
             OutcomeField {

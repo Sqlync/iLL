@@ -237,7 +237,13 @@ impl Disconnected {
 /// the TCP socket isn't yet open, the handshake gets cut off mid-stream,
 /// or the postgres process is still binding its port.
 fn is_transient_connect_error(outcome: &RunOutcome) -> bool {
-    matches!(outcome, RunOutcome::Error { variant: "network", .. })
+    matches!(
+        outcome,
+        RunOutcome::Error {
+            variant: "network",
+            ..
+        }
+    )
 }
 
 impl Connected {
@@ -585,7 +591,7 @@ mod tests {
         );
         assert_eq!(ok.get("row_count"), Some(&Value::Number(2)));
         assert_eq!(ok.get("col_count"), Some(&Value::Number(2)));
-        match ok.get("row") {
+        match ok.get("cell") {
             Some(Value::Array(rows)) => {
                 assert_eq!(rows.len(), 2);
                 match &rows[0] {
@@ -593,10 +599,10 @@ mod tests {
                         assert_eq!(cells[0], Value::Number(1));
                         assert_eq!(cells[1], Value::String("alice".into()));
                     }
-                    other => panic!("row[0] not an array: {other:?}"),
+                    other => panic!("cell[0] not an array: {other:?}"),
                 }
             }
-            other => panic!("ok.row not an array: {other:?}"),
+            other => panic!("ok.cell not an array: {other:?}"),
         }
 
         // disconnect returns to Disconnected
@@ -784,7 +790,7 @@ as alice:
   query ~sql`CREATE TABLE users (id INT, name TEXT)`
   query ~sql`INSERT INTO users VALUES (1, 'alice')`
   query ~sql`SELECT * FROM users WHERE id = 1`
-  assert ok.row[0] == [1, \"alice\"]
+  assert ok.cell[0] == [1, \"alice\"]
 ";
 
         let report = run_test_file(Path::new("e2e.ill"), src).await;
