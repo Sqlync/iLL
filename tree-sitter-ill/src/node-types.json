@@ -847,7 +847,17 @@
   {
     "type": "squiggle_name",
     "named": true,
-    "fields": {}
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "string",
@@ -1057,16 +1067,8 @@
     "named": false
   },
   {
-    "type": "hex",
-    "named": false
-  },
-  {
     "type": "identifier",
     "named": true
-  },
-  {
-    "type": "json",
-    "named": false
   },
   {
     "type": "let",
@@ -1089,16 +1091,8 @@
     "named": false
   },
   {
-    "type": "re",
-    "named": false
-  },
-  {
     "type": "single_quoted_string",
     "named": true
-  },
-  {
-    "type": "sql",
-    "named": false
   },
   {
     "type": "squiggle_content",

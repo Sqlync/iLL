@@ -1327,25 +1327,8 @@
       ]
     },
     "squiggle_name": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "sql"
-        },
-        {
-          "type": "STRING",
-          "value": "json"
-        },
-        {
-          "type": "STRING",
-          "value": "hex"
-        },
-        {
-          "type": "STRING",
-          "value": "re"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "identifier"
     },
     "squiggle_content": {
       "type": "IMMEDIATE_TOKEN",
