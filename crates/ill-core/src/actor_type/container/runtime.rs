@@ -411,19 +411,6 @@ impl ActorInstance for ContainerInstance {
                 ),
             },
         };
-        // Backfill the live host port into `self.port` so other actors that
-        // read `<container>.port` get the dynamically-mapped value, not the
-        // declared one. `Members::set` is a no-op when `port` wasn't
-        // declared on the actor — silent for actors without a `port` var.
-        if cmd == "run" {
-            if let RunOutcome::Ok(ref ok) = outcome {
-                if let Some(Value::Number(p)) = ok.get("port") {
-                    if *p > 0 {
-                        let _ = self.members.set("port", Value::Number(*p));
-                    }
-                }
-            }
-        }
         self.mode = next;
         outcome
     }
@@ -445,7 +432,6 @@ impl ActorInstance for ContainerInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::DeclaredVar;
 
     #[test]
     fn split_image_ref_bare_name_defaults_to_latest() {
@@ -581,73 +567,6 @@ mod tests {
         let td = inst.teardown().await;
         assert!(td.ok, "teardown failed: {:?}", td.message);
         assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires docker"]
-    async fn run_backfills_port_member_with_mapped_host_port() {
-        // Postgres exposes 5432 inside the container; testcontainers maps
-        // that to a random host port. After `run`, `self_view().port` must
-        // be that host port, not the declared 5432 — that's the value
-        // other actors connect to via `<container>.port`.
-        let mut kw = Dict::new();
-        kw.insert("image".into(), Value::String("postgres:18".into()));
-        let args = ConstructArgs {
-            keyword: kw,
-            source_dir: std::env::temp_dir(),
-            vars: vec![DeclaredVar {
-                name: "port".into(),
-                default: Some(Value::Number(5432)),
-            }],
-        };
-        let mut inst = ContainerInstance::construct(&args)
-            .await
-            .ok()
-            .expect("construct failed");
-
-        // Pre-run: self_view sees the declared default.
-        let pre = inst.self_view().expect("self_view populated");
-        assert_eq!(pre.get("port"), Some(&Value::Number(5432)));
-
-        // Postgres needs a password to start.
-        let mut env = Dict::new();
-        env.insert("POSTGRES_PASSWORD".into(), Value::String("pw".into()));
-        let mut run_kw = Dict::new();
-        run_kw.insert("port".into(), Value::Number(5432));
-        run_kw.insert("env".into(), Value::Dict(env));
-        let outcome = inst
-            .execute(
-                "run",
-                &CommandArgs {
-                    positional: Vec::new(),
-                    keyword: run_kw,
-                },
-            )
-            .await;
-        let mapped = match outcome {
-            RunOutcome::Ok(fields) => match fields.get("port") {
-                Some(Value::Number(p)) => *p,
-                other => panic!("expected ok.port number, got {other:?}"),
-            },
-            other => panic!(
-                "expected Ok from run, got {other:?}",
-                other = match other {
-                    RunOutcome::Error { variant, fields } =>
-                        format!("Error({variant}, {fields:?})"),
-                    RunOutcome::NotImplemented { actor, cmd } =>
-                        format!("NotImplemented({actor}, {cmd})"),
-                    RunOutcome::Ok(_) => unreachable!(),
-                }
-            ),
-        };
-        assert!(mapped > 0, "host port should be > 0");
-        assert_ne!(mapped, 5432, "host port should differ from container port");
-
-        // Post-run: self_view reflects the mapped host port.
-        let post = inst.self_view().expect("self_view populated");
-        assert_eq!(post.get("port"), Some(&Value::Number(mapped)));
-
-        let _ = inst.teardown().await;
     }
 
     #[tokio::test]
