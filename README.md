@@ -69,7 +69,7 @@ Different actor types (ex: postgres client, bash, mqtt, etc.) offer different ac
 
 iLL tests interact with many systems and those systems often have their own syntax. `SELECT 1` is a string, but it's also a SQL statement. Squiggles give that meaning to a literal: `` ~sql`SELECT 1` `` is highlighted and validated as SQL, then evaluates to a string. `` ~hex`DEADBEEF` `` is validated as base 16 and evaluates to a string (eventually a byte sequence). `` ~re`^a.+b$` `` is a regex pattern. Backtick content is raw, so escape sequences like `\.` pass through unchanged — handy for regex and embedded query languages where `"..."` would force you to double-escape.
 
-Squiggles currently live in the standard library; user-defined squiggles are planned.
+Squiggles currently live in the standard library; user-defined squiggles are planned. Squiggles are inspired by Elixir sigils, but the name "squiggle" was chosen to avoid endless arguments about the meaning of a sigil in computer science.
 
 ## FAQ
 
