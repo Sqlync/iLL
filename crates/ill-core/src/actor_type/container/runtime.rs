@@ -411,19 +411,6 @@ impl ActorInstance for ContainerInstance {
                 ),
             },
         };
-        // Backfill the live host port into `self.port` so other actors that
-        // read `<container>.port` get the dynamically-mapped value, not the
-        // declared one. `Members::set` is a no-op when `port` wasn't
-        // declared on the actor — silent for actors without a `port` var.
-        if cmd == "run" {
-            if let RunOutcome::Ok(ref ok) = outcome {
-                if let Some(Value::Number(p)) = ok.get("port") {
-                    if *p > 0 {
-                        let _ = self.members.set("port", Value::Number(*p));
-                    }
-                }
-            }
-        }
         self.mode = next;
         outcome
     }
