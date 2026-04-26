@@ -65,11 +65,11 @@ Actors have member variables, much like classes or structs in other languages. T
 
 Different actor types (ex: postgres client, bash, mqtt, etc.) offer different actions depending on what "mode" they are in. For example, a postgres client may be in a "disconnected" mode and unable to run queries until it connects to a postgres server, at which point it will be in a "connected" mode and able to run queries. The iLL compiler is aware of this transition and can provide useful functionality like catching errors at compile time and providing hints to IDEs.
 
-### Sigils
+### Squiggles
 
-iLL tests interact with many systems and those systems often have their own syntax. `SELECT 1` is a string, but it's also a SQL statement. Sigils give that meaning to a literal: `` ~sql`SELECT 1` `` is highlighted and validated as SQL, then evaluates to a string. `` ~hex`DEADBEEF` `` is validated as base 16 and evaluates to a string (eventually a byte sequence). `` ~re`^a.+b$` `` is a regex pattern. Backtick content is raw, so escape sequences like `\.` pass through unchanged — handy for regex and embedded query languages where `"..."` would force you to double-escape.
+iLL tests interact with many systems and those systems often have their own syntax. `SELECT 1` is a string, but it's also a SQL statement. Squiggles give that meaning to a literal: `` ~sql`SELECT 1` `` is highlighted and validated as SQL, then evaluates to a string. `` ~hex`DEADBEEF` `` is validated as base 16 and evaluates to a string (eventually a byte sequence). `` ~re`^a.+b$` `` is a regex pattern. Backtick content is raw, so escape sequences like `\.` pass through unchanged — handy for regex and embedded query languages where `"..."` would force you to double-escape.
 
-Sigils currently live in the standard library; user-defined sigils are planned.
+Squiggles currently live in the standard library; user-defined squiggles are planned.
 
 ## FAQ
 

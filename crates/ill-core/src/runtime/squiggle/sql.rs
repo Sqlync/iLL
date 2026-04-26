@@ -1,12 +1,12 @@
 use crate::actor_type::ValueType;
 
-use super::Sigil;
+use super::Squiggle;
 
 /// `~sql` — a SQL string. For now it's a plain string with tagged syntax;
 /// parameterization is deferred until pg_client needs it.
 pub struct Sql;
 
-impl Sigil for Sql {
+impl Squiggle for Sql {
     fn name(&self) -> &'static str {
         "sql"
     }

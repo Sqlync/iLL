@@ -1122,7 +1122,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "sigil"
+          "name": "squiggle"
         },
         {
           "type": "SYMBOL",
@@ -1285,7 +1285,7 @@
         }
       ]
     },
-    "sigil": {
+    "squiggle": {
       "type": "SEQ",
       "members": [
         {
@@ -1297,7 +1297,7 @@
           "name": "name",
           "content": {
             "type": "SYMBOL",
-            "name": "sigil_name"
+            "name": "squiggle_name"
           }
         },
         {
@@ -1315,7 +1315,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "sigil_content"
+                "name": "squiggle_content"
               }
             ]
           }
@@ -1326,7 +1326,7 @@
         }
       ]
     },
-    "sigil_name": {
+    "squiggle_name": {
       "type": "CHOICE",
       "members": [
         {
@@ -1347,7 +1347,7 @@
         }
       ]
     },
-    "sigil_content": {
+    "squiggle_content": {
       "type": "IMMEDIATE_TOKEN",
       "content": {
         "type": "PREC",

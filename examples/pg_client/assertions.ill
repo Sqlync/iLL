@@ -1,4 +1,4 @@
-# assertion operators and multi-line sigils
+# assertion operators and multi-line squiggles
 #
 # demonstrates all supported assertion operators:
 #   ==, !=, >, >=, <, <=, contains, !contains, matches, !matches
@@ -25,7 +25,7 @@ as alice:
     port: db.port
     database: "test"
 
-  # multi-line sigils work naturally
+  # multi-line squiggles work naturally
   query ~sql`
     CREATE TABLE users (
       id SERIAL PRIMARY KEY,

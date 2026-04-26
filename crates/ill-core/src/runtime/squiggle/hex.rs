@@ -1,6 +1,6 @@
 use crate::actor_type::ValueType;
 
-use super::Sigil;
+use super::Squiggle;
 
 /// `~hex` — stub. Evaluates as the rendered string for now, so `output_type`
 /// is honestly `String`. When a consumer (e.g. mqtt) needs real binary
@@ -8,7 +8,7 @@ use super::Sigil;
 /// `output_type` to `Bytes`.
 pub struct Hex;
 
-impl Sigil for Hex {
+impl Squiggle for Hex {
     fn name(&self) -> &'static str {
         "hex"
     }

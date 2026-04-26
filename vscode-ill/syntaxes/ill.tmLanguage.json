@@ -108,7 +108,7 @@
     "expression": {
       "patterns": [
         { "include": "#parse-expression" },
-        { "include": "#sigil" },
+        { "include": "#squiggle" },
         { "include": "#double-quoted-string" },
         { "include": "#single-quoted-string" },
         { "include": "#atom" },
@@ -131,20 +131,20 @@
       }
     },
 
-    "sigil": {
+    "squiggle": {
       "patterns": [
-        { "include": "#sigil-sql" },
-        { "include": "#sigil-json" }
+        { "include": "#squiggle-sql" },
+        { "include": "#squiggle-json" }
       ]
     },
 
-    "sigil-sql": {
-      "name": "meta.sigil.sql.ill",
+    "squiggle-sql": {
+      "name": "meta.squiggle.sql.ill",
       "begin": "(~)(sql)(`)",
       "end": "`",
       "beginCaptures": {
-        "1": { "name": "punctuation.definition.sigil.ill" },
-        "2": { "name": "keyword.other.sigil.ill" },
+        "1": { "name": "punctuation.definition.squiggle.ill" },
+        "2": { "name": "keyword.other.squiggle.ill" },
         "3": { "name": "punctuation.definition.string.begin.ill" }
       },
       "endCaptures": {
@@ -156,13 +156,13 @@
       ]
     },
 
-    "sigil-json": {
-      "name": "meta.sigil.json.ill",
+    "squiggle-json": {
+      "name": "meta.squiggle.json.ill",
       "begin": "(~)(json)(`)",
       "end": "`",
       "beginCaptures": {
-        "1": { "name": "punctuation.definition.sigil.ill" },
-        "2": { "name": "keyword.other.sigil.ill" },
+        "1": { "name": "punctuation.definition.squiggle.ill" },
+        "2": { "name": "keyword.other.squiggle.ill" },
         "3": { "name": "punctuation.definition.string.begin.ill" }
       },
       "endCaptures": {

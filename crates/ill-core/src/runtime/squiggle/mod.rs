@@ -1,8 +1,8 @@
-// Sigils. `~name`backtick-fragments-backtick is a tagged string literal. At
-// runtime the fragments (text + interpolations) are handed to a `Sigil` impl,
-// which decides what `Value` the expression produces. Most sigils are "just
+// Squiggles. `~name`backtick-fragments-backtick is a tagged string literal. At
+// runtime the fragments (text + interpolations) are handed to a `Squiggle` impl,
+// which decides what `Value` the expression produces. Most squiggles are "just
 // strings with a tag for syntax highlighting and validation" — those get the
-// default `eval` for free. A sigil like `~hex` can override `eval` to return
+// default `eval` for free. A squiggle like `~hex` can override `eval` to return
 // `Value::Bytes` instead.
 
 use std::collections::HashMap;
@@ -24,16 +24,16 @@ use json::Json;
 use re::Re;
 use sql::Sql;
 
-pub trait Sigil: Send + Sync {
+pub trait Squiggle: Send + Sync {
     fn name(&self) -> &'static str;
 
-    /// Static declaration of the `Value` shape this sigil produces. The
+    /// Static declaration of the `Value` shape this squiggle produces. The
     /// validator uses this for type checking; the runtime asserts the
     /// declaration holds after each `eval`.
     fn output_type(&self) -> ValueType;
 
-    /// Produce the runtime `Value` for this sigil. Default: concatenate all
-    /// fragments (with interpolations rendered) into a `Value::String`. Sigils
+    /// Produce the runtime `Value` for this squiggle. Default: concatenate all
+    /// fragments (with interpolations rendered) into a `Value::String`. Squiggles
     /// that declare a non-`String` `output_type()` must override this.
     fn eval(&self, fragments: &[StringFragment], scope: &Scope) -> Result<Value, RuntimeError> {
         concat_fragments(fragments, scope).map(Value::String)
@@ -42,7 +42,7 @@ pub trait Sigil: Send + Sync {
 
 /// Render string fragments — literal text interleaved with `${expr}` holes —
 /// into a single `String`. Shared between plain string literals and the
-/// default sigil eval.
+/// default squiggle eval.
 pub fn concat_fragments(
     fragments: &[StringFragment],
     scope: &Scope,
@@ -72,7 +72,7 @@ pub fn concat_fragments(
 }
 
 pub struct Registry {
-    sigils: HashMap<&'static str, &'static dyn Sigil>,
+    squiggles: HashMap<&'static str, &'static dyn Squiggle>,
 }
 
 impl Registry {
@@ -83,7 +83,7 @@ impl Registry {
 
     fn build() -> Registry {
         let mut r = Registry {
-            sigils: HashMap::new(),
+            squiggles: HashMap::new(),
         };
         r.register(&Sql);
         r.register(&Json);
@@ -92,13 +92,13 @@ impl Registry {
         r
     }
 
-    fn register(&mut self, s: &'static dyn Sigil) {
-        let prev = self.sigils.insert(s.name(), s);
-        assert!(prev.is_none(), "duplicate sigil: {}", s.name());
+    fn register(&mut self, s: &'static dyn Squiggle) {
+        let prev = self.squiggles.insert(s.name(), s);
+        assert!(prev.is_none(), "duplicate squiggle: {}", s.name());
     }
 
-    pub fn get(&self, name: &str) -> Option<&'static dyn Sigil> {
-        self.sigils.get(name).copied()
+    pub fn get(&self, name: &str) -> Option<&'static dyn Squiggle> {
+        self.squiggles.get(name).copied()
     }
 }
 
@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_sigil_lookup_is_none() {
+    fn unknown_squiggle_lookup_is_none() {
         assert!(Registry::global().get("does_not_exist").is_none());
     }
 
@@ -129,10 +129,10 @@ mod tests {
 
     #[test]
     fn output_type_mismatch_is_caught_at_eval() {
-        // A sigil that declares Bytes but returns a String (the default).
-        // The Expr::Sigil arm runs `accepts` and rejects the mismatch.
+        // A squiggle that declares Bytes but returns a String (the default).
+        // The Expr::Squiggle arm runs `accepts` and rejects the mismatch.
         struct Liar;
-        impl Sigil for Liar {
+        impl Squiggle for Liar {
             fn name(&self) -> &'static str {
                 "liar"
             }

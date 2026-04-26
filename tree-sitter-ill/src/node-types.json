@@ -780,7 +780,7 @@
           "named": true
         },
         {
-          "type": "sigil",
+          "type": "squiggle",
           "named": true
         },
         {
@@ -789,41 +789,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "sigil",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "sigil_name",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "interpolation",
-          "named": true
-        },
-        {
-          "type": "sigil_content",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "sigil_name",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "source_file",
@@ -848,6 +813,41 @@
         }
       ]
     }
+  },
+  {
+    "type": "squiggle",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "squiggle_name",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "interpolation",
+          "named": true
+        },
+        {
+          "type": "squiggle_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "squiggle_name",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "string",
@@ -1093,16 +1093,16 @@
     "named": false
   },
   {
-    "type": "sigil_content",
-    "named": true
-  },
-  {
     "type": "single_quoted_string",
     "named": true
   },
   {
     "type": "sql",
     "named": false
+  },
+  {
+    "type": "squiggle_content",
+    "named": true
   },
   {
     "type": "string_content",
