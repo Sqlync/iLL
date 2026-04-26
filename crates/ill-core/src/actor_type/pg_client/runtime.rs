@@ -167,10 +167,9 @@ impl Disconnected {
                         // as `error.network.reason == :connection_lost`.
                         let _ = connection.await;
                     });
-                    let ok = ConnectOk { is_connected: true };
                     return (
                         PgMode::Connected(Connected { client, conn_task }),
-                        RunOutcome::Ok(ok.into_dict()),
+                        RunOutcome::Ok(ConnectOk {}.into_dict()),
                     );
                 }
                 Ok(Err(e)) => {
@@ -563,11 +562,10 @@ mod tests {
             .expect("construct");
         assert!(matches!(inst.mode, PgMode::Disconnected(_)));
 
-        let ok = expect_ok(
+        let _ = expect_ok(
             inst.execute("connect", &connect_args(port, PG_USER, PG_PASSWORD, PG_DB))
                 .await,
         );
-        assert_eq!(ok.get("is_connected"), Some(&Value::Bool(true)));
         assert!(matches!(inst.mode, PgMode::Connected(_)));
 
         // DDL

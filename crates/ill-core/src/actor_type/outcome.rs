@@ -73,6 +73,7 @@ macro_rules! define_outcome {
             ];
 
             pub fn into_dict(self) -> $crate::runtime::Dict {
+                #[allow(unused_mut)]
                 let mut m = $crate::runtime::Dict::new();
                 $(m.insert(
                     stringify!($field).into(),

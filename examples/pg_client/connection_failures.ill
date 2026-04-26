@@ -39,4 +39,3 @@ as alice:
     password: "root"
     port: db.port
     database: "test"
-  assert ok.is_connected

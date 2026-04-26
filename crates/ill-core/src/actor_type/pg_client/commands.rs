@@ -6,19 +6,21 @@ use crate::define_outcome;
 
 // ── Outcome shapes ────────────────────────────────────────────────────────────
 //
-// `Connect` and `Query` declare structured results that assertions address as
-// `ok.is_connected`, `ok.row[i]` / `ok.row[i][j]`, `ok.col["name"]`,
-// `ok.row_count`, `ok.col_count`. The row / column structures carry
-// heterogeneous values and go through as `Dynamic` — the validator can't
-// reason about their inner shape, but `assert ok.row[0] == [1, "alice"]`
-// resolves through the runtime's indexing.
+// `Query` declares a structured result that assertions address as
+// `ok.row[i]` / `ok.row[i][j]`, `ok.col["name"]`, `ok.row_count`,
+// `ok.col_count`. The row / column structures carry heterogeneous values
+// and go through as `Dynamic` — the validator can't reason about their
+// inner shape, but `assert ok.row[0] == [1, "alice"]` resolves through
+// the runtime's indexing.
+//
+// `Connect` has no ok fields — success is signalled by the absence of an
+// `error.*`. Examples assert connection success implicitly by running
+// follow-up queries.
 
 define_outcome! {
-    /// Result of `pg_client.connect`. `is_connected` is always `true` on the
-    /// ok branch — examples use `assert ok.is_connected` as a smoke test.
-    pub ConnectOk {
-        is_connected: Bool,
-    }
+    /// Result of `pg_client.connect`. No fields — the `Ok` branch is the
+    /// signal; failures surface via `error.network.*` / `error.connect.*`.
+    pub ConnectOk {}
 }
 
 define_outcome! {
