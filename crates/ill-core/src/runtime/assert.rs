@@ -56,7 +56,6 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bytes(b) => !b.is_empty(),
         Value::Atom(_) => true,
         Value::Null => false,
-        Value::Unset => false,
     }
 }
 

@@ -369,12 +369,15 @@ fn value_as_u16(v: &Value) -> Option<u16> {
 }
 
 /// Build the initial member-var dict from the actor declaration. Vars
-/// without a default surface as `Value::Unset` so `self.<name>` resolves
-/// to "not yet set" rather than failing the lookup outright.
+/// without a default are skipped — `self.<name>` then surfaces as a
+/// "no field" lookup error, which is the right failure for "you read
+/// something that was never set."
 fn build_members(vars: &[DeclaredVar]) -> Dict {
     let mut out = Dict::new();
     for v in vars {
-        out.insert(v.name.clone(), v.default.clone().unwrap_or(Value::Unset));
+        if let Some(default) = &v.default {
+            out.insert(v.name.clone(), default.clone());
+        }
     }
     out
 }
@@ -506,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn build_members_seeds_defaults_and_marks_undefaulted_as_unit() {
+    fn build_members_seeds_defaults_and_skips_undefaulted() {
         let vars = vec![
             DeclaredVar {
                 name: "port".into(),
@@ -519,7 +522,7 @@ mod tests {
         ];
         let m = build_members(&vars);
         assert_eq!(m.get("port"), Some(&Value::Number(8080)));
-        assert_eq!(m.get("name"), Some(&Value::Unset));
+        assert_eq!(m.get("name"), None);
     }
 
     // ── Docker-gated tests ─────────────────────────────────────────────────
