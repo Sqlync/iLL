@@ -32,8 +32,8 @@ pub enum DiagnosticCode {
     // Types (narrow scope for Phase 4)
     TypeMismatch,
 
-    // Sigils
-    UnknownSigil,
+    // Squiggles
+    UnknownSquiggle,
 }
 
 #[derive(Debug, Clone)]

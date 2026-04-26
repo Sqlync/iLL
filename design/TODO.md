@@ -8,10 +8,9 @@
 split actors into separate crates, this will allow users to easily create their own actors
 
 ## Near Term
-sigils
-- consider renaming to "tagged literal"
-- update tree-sitter grammar to allow arbitrary sigil types
-- actually validate sigil contents
+squiggles
+- update tree-sitter grammar to allow arbitrary squiggle types
+- actually validate squiggle contents
 - split into separate crates
 consider implementing a ValueType instead of using stringly typed types
 bugs

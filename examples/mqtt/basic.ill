@@ -51,7 +51,7 @@ as alice:
   receive publish
   assert ok.payload == "got: world"
 
-  # publish a binary payload using ~hex sigil
+  # publish a binary payload using ~hex squiggle
   publish_0 "sensors/data", ~hex`DEADBEEF`
   receive publish
   assert ok.payload == ~hex`DEADBEEF`

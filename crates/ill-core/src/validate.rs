@@ -17,7 +17,7 @@ use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeFie
 use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
-use crate::runtime::sigil::Registry as SigilRegistry;
+use crate::runtime::squiggle::Registry as SquiggleRegistry;
 
 /// Per-actor state threaded through the symbolic walk.
 struct ActorState {
@@ -517,8 +517,8 @@ fn expr_type(expr: &Expr) -> ValueType {
         Expr::Number(_) => ValueType::Number,
         Expr::Bool(_) => ValueType::Bool,
         Expr::Atom(_) => ValueType::Atom,
-        Expr::Sigil(sigil) => SigilRegistry::global()
-            .get(&sigil.name.name)
+        Expr::Squiggle(squiggle) => SquiggleRegistry::global()
+            .get(&squiggle.name.name)
             .map(|s| s.output_type())
             .unwrap_or(ValueType::Unknown),
         _ => ValueType::Unknown,

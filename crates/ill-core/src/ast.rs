@@ -153,7 +153,7 @@ pub enum Expr {
     Bool(bool),
     Atom(Ident),
     Array(Vec<Expr>),
-    Sigil(Sigil),
+    Squiggle(Squiggle),
     MemberAccess {
         object: Box<Expr>,
         property: Ident,
@@ -167,7 +167,7 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
-pub struct Sigil {
+pub struct Squiggle {
     pub name: Ident,
     pub fragments: Vec<StringFragment>,
     pub span: Span,

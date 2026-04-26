@@ -29,7 +29,7 @@ as alice:
   query ~sql`INSERT INTO users VALUES (2, 'bob')`
 
   # "error" catches expected failures and allows assertions
-  # we aren't using a ~sql sigil, because we don't want to evaluate the statement
+  # we aren't using a ~sql squiggle, because we don't want to evaluate the statement
   query "SELEC invalid"
   assert error.query.reason == :syntax_error
 

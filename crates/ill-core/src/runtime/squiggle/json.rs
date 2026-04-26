@@ -1,6 +1,6 @@
 use crate::actor_type::ValueType;
 
-use super::Sigil;
+use super::Squiggle;
 
 /// `~json` — stub. Evaluates as the rendered string for now, so `output_type`
 /// is honestly `String`. When the http actor actually consumes JSON bodies,
@@ -8,7 +8,7 @@ use super::Sigil;
 /// `output_type` to `Dynamic`.
 pub struct Json;
 
-impl Sigil for Json {
+impl Squiggle for Json {
     fn name(&self) -> &'static str {
         "json"
     }

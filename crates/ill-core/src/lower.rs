@@ -73,7 +73,7 @@ impl std::fmt::Display for LowerError {
 impl std::error::Error for LowerError {}
 
 /// Process backslash escape sequences in a double-quoted string fragment.
-/// Sigils and single-quoted strings are raw and skip this pass.
+/// Squiggles and single-quoted strings are raw and skip this pass.
 fn unescape(s: &str) -> Result<String, String> {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -619,7 +619,7 @@ impl<'a> LowerCtx<'a> {
             "member_expression" => self.lower_member_expression(node),
             "index_expression" => self.lower_index_expression(node),
             // Sometimes tree-sitter gives us the inner node directly
-            "identifier" | "string" | "number" | "boolean" | "atom" | "array" | "sigil" => {
+            "identifier" | "string" | "number" | "boolean" | "atom" | "array" | "squiggle" => {
                 self.lower_primary(node)
             }
             _ => {
@@ -657,7 +657,7 @@ impl<'a> LowerCtx<'a> {
                 Some(Expr::Atom(self.ident_from_node(node.named_child(0)?)))
             }
             "string" => self.lower_string(node),
-            "sigil" => self.lower_sigil(node),
+            "squiggle" => self.lower_squiggle(node),
             "array" => self.lower_array(node),
             _ => {
                 self.errors.push(LowerError::UnexpectedNode {
@@ -759,7 +759,7 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Collect `{text_kind | interpolation}*` children into a fragment list.
-    /// Shared between strings (`string_content`) and sigils (`sigil_content`).
+    /// Shared between strings (`string_content`) and squiggles (`squiggle_content`).
     fn collect_fragments(
         &mut self,
         node: tree_sitter::Node,
@@ -780,13 +780,13 @@ impl<'a> LowerCtx<'a> {
         fragments
     }
 
-    // ── Sigils ─────────────────────────────────────────────────────────────
+    // ── Squiggles ──────────────────────────────────────────────────────────
 
-    fn lower_sigil(&mut self, node: tree_sitter::Node) -> Option<Expr> {
+    fn lower_squiggle(&mut self, node: tree_sitter::Node) -> Option<Expr> {
         let name = self.ident_from_node(node.child_by_field_name("name")?);
-        let fragments = self.collect_fragments(node, "sigil_content");
+        let fragments = self.collect_fragments(node, "squiggle_content");
 
-        Some(Expr::Sigil(Sigil {
+        Some(Expr::Squiggle(Squiggle {
             name,
             fragments,
             span: self.span(node),

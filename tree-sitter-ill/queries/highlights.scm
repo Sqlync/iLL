@@ -87,12 +87,12 @@
   "${" @punctuation.special
   "}" @punctuation.special)
 
-; ─── Sigils (~sql`...`, ~json`...`, ~hex`...`) ──────────────────────────────────────────
+; ─── Squiggles (~sql`...`, ~json`...`, ~hex`...`) ───────────────────────────
 
-(sigil "~" @string.special)
-(sigil_name) @string.special
-(sigil "`" @string.special)
-(sigil_content) @string
+(squiggle "~" @string.special)
+(squiggle_name) @string.special
+(squiggle "`" @string.special)
+(squiggle_content) @string
 
 ; ─── Atoms (:syntax_error, :timeout, etc.) ───────────────────────────────────
 

@@ -54,6 +54,6 @@ as alice:
   assert ok.row[0] == [1, "alice"]
 
   # expected errors
-  # note: we are not using a ~sql sigil, because we don't want to evaluate the statement
+  # note: we are not using a ~sql squiggle, because we don't want to evaluate the statement
   query "SELEC invalid"
   assert error.query.reason == :syntax_error

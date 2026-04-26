@@ -2,7 +2,7 @@
 // idents resolved against a scope, member access on Dicts, plain string
 // concatenation of fragments, and indexing into arrays and dicts (used by
 // query-result assertions like `ok.row[0]`, `ok.col["name"]`, `ok.row[i][j]`).
-// Sigils dispatch through `runtime::sigil::Registry`. `let parse` is still
+// Squiggles dispatch through `runtime::squiggle::Registry`. `let parse` is still
 // deferred — it returns an Eval error so the test fails clearly if an example
 // outgrows this subset.
 
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::{Expr, StringLit};
 
-use super::sigil::{concat_fragments, Registry as SigilRegistry};
+use super::squiggle::{concat_fragments, Registry as SquiggleRegistry};
 use super::{RuntimeError, Value};
 
 /// Name→Value scope. `ok`, `error`, `self`, and per-actor vars all live here
@@ -77,19 +77,19 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
             }
             Ok(Value::Array(out))
         }
-        Expr::Sigil(s) => {
-            let Some(sigil) = SigilRegistry::global().get(&s.name.name) else {
+        Expr::Squiggle(s) => {
+            let Some(squiggle) = SquiggleRegistry::global().get(&s.name.name) else {
                 return Err(RuntimeError::Eval(format!(
-                    "unknown sigil `~{}`",
+                    "unknown squiggle `~{}`",
                     s.name.name
                 )));
             };
-            let value = sigil.eval(&s.fragments, scope)?;
-            if !value.is_of_type(sigil.output_type()) {
+            let value = squiggle.eval(&s.fragments, scope)?;
+            if !value.is_of_type(squiggle.output_type()) {
                 return Err(RuntimeError::Eval(format!(
-                    "sigil `~{}` declared {:?} but produced {}",
-                    sigil.name(),
-                    sigil.output_type(),
+                    "squiggle `~{}` declared {:?} but produced {}",
+                    squiggle.name(),
+                    squiggle.output_type(),
                     value.type_name()
                 )));
             }

@@ -227,7 +227,7 @@ module.exports = grammar({
       choice(
         $.identifier,
         $.string,
-        $.sigil,
+        $.squiggle,
         $.number,
         $.boolean,
         $.atom,
@@ -255,20 +255,20 @@ module.exports = grammar({
 
     interpolation: ($) => seq(token.immediate(prec(2, "${")), $._expression, "}"),
 
-    // ─── Sigils ────────────────────────────────────────────────────────
-    sigil: ($) =>
+    // ─── Squiggles ─────────────────────────────────────────────────────
+    squiggle: ($) =>
       seq(
         "~",
-        field("name", $.sigil_name),
+        field("name", $.squiggle_name),
         "`",
-        repeat(choice($.interpolation, $.sigil_content)),
+        repeat(choice($.interpolation, $.squiggle_content)),
         "`",
       ),
 
-    sigil_name: (_) => choice("sql", "json", "hex", "re"),
+    squiggle_name: (_) => choice("sql", "json", "hex", "re"),
 
     // Same lone-$ fix as string_content.
-    sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),
+    squiggle_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),
 
     // ─── Primitives ────────────────────────────────────────────────────
     number: (_) => /\d+/,
