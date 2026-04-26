@@ -67,7 +67,9 @@ Different actor types (ex: postgres client, bash, mqtt, etc.) offer different ac
 
 ### Sigils
 
-A sigil is a tagged literal: `~name` followed by backtick-delimited content, like `` ~sql`SELECT 1` `` or `` ~re`^charlie@.+\.org$` ``. The tag picks the sigil — registered sigils today include `sql`, `json`, `hex`, and `re` — which decides what type of value the literal produces and what compile-time checks apply. Backtick content is raw, so escapes like `\.` or `\n` pass through unchanged, which is useful for regex patterns, file paths, and embedded query languages. Plain `"..."` strings are for the regular escape-processed case; sigils are for everything else.
+iLL tests interact with many systems and those systems often have their own syntax or language. For example, `SELECT 1` is a string, but it is also a SQL statement. Sigils can be used to for syntax highlighting and validation of system specific meaning that renders to a base type. For example, ``~sql`SELECT 1` `` will have syntax highlighting for SQL and be validated as SQL at interpretation time. If it is valid, it will just be turned into the sigil's underlying type, in this case a string. The hex sigil, ``~hex`DEADBEAF` `` will be validated to be base 16, then turned into a binary string.
+
+Sigils are currently in the standard library, but will soon be user extensible.
 
 ## FAQ
 
