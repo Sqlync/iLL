@@ -67,9 +67,9 @@ Different actor types (ex: postgres client, bash, mqtt, etc.) offer different ac
 
 ### Sigils
 
-iLL tests interact with many systems and those systems often have their own syntax or language. For example, `SELECT 1` is a string, but it is also a SQL statement. Sigils can be used to for syntax highlighting and validation of system specific meaning that renders to a base type. For example, ``~sql`SELECT 1` `` will have syntax highlighting for SQL and be validated as SQL at interpretation time. If it is valid, it will just be turned into the sigil's underlying type, in this case a string. The hex sigil, ``~hex`DEADBEAF` `` will be validated to be base 16, then turned into a binary string.
+iLL tests interact with many systems and those systems often have their own syntax. `SELECT 1` is a string, but it's also a SQL statement. Sigils give that meaning to a literal: `` ~sql`SELECT 1` `` is highlighted and validated as SQL, then evaluates to a string. `` ~hex`DEADBEEF` `` is validated as base 16 and evaluates to a string (eventually a byte sequence). `` ~re`^a.+b$` `` is a regex pattern. Backtick content is raw, so escape sequences like `\.` pass through unchanged — handy for regex and embedded query languages where `"..."` would force you to double-escape.
 
-Sigils are currently in the standard library, but will soon be user extensible.
+Sigils currently live in the standard library; user-defined sigils are planned.
 
 ## FAQ
 
