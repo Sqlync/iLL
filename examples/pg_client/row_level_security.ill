@@ -11,7 +11,9 @@ as db:
   run,
     port: self.port
     env:
+      POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
 
 # admin sets up the schema and row-level security policies
 as admin:

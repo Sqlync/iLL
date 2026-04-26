@@ -14,7 +14,9 @@ as db:
   run,
     port: self.port
     env:
+      POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
 
 as alice:
   connect,
