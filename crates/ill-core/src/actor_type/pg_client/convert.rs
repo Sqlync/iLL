@@ -14,37 +14,32 @@ use crate::runtime::{Dict, Value};
 
 /// Build the structured `ok.*` dict for a query result: `row`, `col`,
 /// `row_count`, `col_count`. `row` is the 2D array — `row[i]` is row
-/// `i`, `row[i][j]` is that row's `j`th cell.
+/// `i`, `row[i][j]` is that row's `j`th cell. `col` is the same data
+/// transposed and keyed by column name.
 pub fn build_result_dict(rows: &[Row]) -> Dict {
-    let col_count = rows.first().map(|r| r.columns().len()).unwrap_or(0);
-    let col_names: Vec<String> = rows
-        .first()
-        .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
-        .unwrap_or_default();
+    let columns = rows.first().map(|r| r.columns()).unwrap_or(&[]);
+    let col_count = columns.len();
 
+    // Build cells once; accumulate row-major and column-major in lockstep
+    // so the cell values aren't cloned. `col` preserves declared column
+    // order because `Dict` is an `IndexMap`.
     let mut row_values: Vec<Value> = Vec::with_capacity(rows.len());
+    let mut col_buckets: Vec<Vec<Value>> = (0..col_count)
+        .map(|_| Vec::with_capacity(rows.len()))
+        .collect();
     for row in rows {
         let mut cells: Vec<Value> = Vec::with_capacity(col_count);
-        for i in 0..row.columns().len() {
-            cells.push(cell_to_value(row, i));
+        for i in 0..col_count {
+            let v = cell_to_value(row, i);
+            col_buckets[i].push(v.clone());
+            cells.push(v);
         }
         row_values.push(Value::Array(cells));
     }
 
-    // col: Dict of column-name → Array of values. Preserves column order
-    // because Dict is an IndexMap, so `ok.col[0]` returns the first
-    // column as declared by the query.
     let mut col_dict: Dict = Dict::new();
-    for (ci, name) in col_names.iter().enumerate() {
-        let mut column_cells: Vec<Value> = Vec::with_capacity(rows.len());
-        for row_value in &row_values {
-            let cell = match row_value {
-                Value::Array(cells) => cells.get(ci).cloned().unwrap_or(Value::Null),
-                _ => Value::Null,
-            };
-            column_cells.push(cell);
-        }
-        col_dict.insert(name.clone(), Value::Array(column_cells));
+    for (i, bucket) in col_buckets.into_iter().enumerate() {
+        col_dict.insert(columns[i].name().to_string(), Value::Array(bucket));
     }
 
     let mut out = Dict::new();

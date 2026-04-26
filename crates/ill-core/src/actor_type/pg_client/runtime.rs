@@ -110,12 +110,18 @@ pub struct Connected {
     conn_task: JoinHandle<()>,
 }
 
+impl Drop for Connected {
+    /// Belt-and-suspenders: if the instance is dropped without going
+    /// through `disconnect`/`teardown` (e.g. a panic mid-test), the
+    /// background task is still aborted instead of detaching and running
+    /// until postgres EOFs the connection.
+    fn drop(&mut self) {
+        self.conn_task.abort();
+    }
+}
+
 impl PgClientInstance {
     pub async fn construct(_args: &ConstructArgs) -> Result<Self, RuntimeError> {
-        // No I/O here. `pg_client` takes no declaration-time kwargs; the
-        // connection is established lazily by `connect`. That keeps the
-        // construct-time error surface empty and routes all network /
-        // auth failures through `error.network.*` / `error.connect.*`.
         Ok(PgClientInstance {
             mode: PgMode::default(),
         })
@@ -124,64 +130,14 @@ impl PgClientInstance {
 
 impl Disconnected {
     async fn connect(self, kw: &Dict) -> (PgMode, RunOutcome) {
-        let mut cfg = Config::new();
-
-        match kw.get("host") {
-            Some(Value::String(s)) => {
-                cfg.host(s);
-            }
-            None => {
-                cfg.host(DEFAULT_HOST);
-            }
-            Some(_) => {
-                // Validator catches type mismatches on declared kwargs; if a
-                // mismatched value gets here, treat it as a bad config and
-                // return a generic connect error rather than panicking.
-                return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER));
-            }
-        }
-
-        let port = match kw.get("port") {
-            Some(Value::Number(n)) if *n > 0 && *n <= u16::MAX as i64 => *n as u16,
-            Some(Value::Number(_)) => {
-                return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER));
-            }
-            Some(_) => {
-                return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER));
-            }
-            None => DEFAULT_PORT,
+        // Defensive parse — the validator already enforces required kwargs
+        // and types. Anything that gets through is a direct ActorInstance
+        // use (tests) or a validator gap; either way we surface
+        // `:other` rather than panicking.
+        let (cfg, timeout) = match build_config(kw) {
+            Ok(pair) => pair,
+            Err(()) => return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER)),
         };
-        cfg.port(port);
-
-        match kw.get("user") {
-            Some(Value::String(s)) => {
-                cfg.user(s);
-            }
-            _ => {
-                // Validator enforces `user` is required; this branch is
-                // defensive for direct ActorInstance use (tests).
-                return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER));
-            }
-        }
-
-        if let Some(Value::String(s)) = kw.get("password") {
-            cfg.password(s);
-        }
-
-        match kw.get("database") {
-            Some(Value::String(s)) => {
-                cfg.dbname(s);
-            }
-            _ => {
-                return (PgMode::Disconnected(self), connect_error(CONNECT_OTHER));
-            }
-        }
-
-        let timeout = match kw.get("timeout") {
-            Some(Value::Number(n)) if *n > 0 => Duration::from_millis(*n as u64),
-            _ => DEFAULT_CONNECT_TIMEOUT,
-        };
-        cfg.connect_timeout(timeout);
 
         // Retry transient transport failures (refused / unreachable / TCP
         // timeout) up to the overall `timeout` budget. Postgres inside a
@@ -234,6 +190,54 @@ impl Disconnected {
     }
 }
 
+/// Translate connect kwargs into a `tokio_postgres::Config` plus the
+/// overall timeout budget. Returns `Err(())` if any declared-but-required
+/// kwarg is missing or any kwarg has the wrong type — the caller maps
+/// that to `error.connect.reason == :other`.
+fn build_config(kw: &Dict) -> Result<(Config, Duration), ()> {
+    let mut cfg = Config::new();
+
+    let host = match kw.get("host") {
+        Some(Value::String(s)) => s.as_str(),
+        None => DEFAULT_HOST,
+        Some(_) => return Err(()),
+    };
+    cfg.host(host);
+
+    let port = match kw.get("port") {
+        Some(Value::Number(n)) if *n > 0 && *n <= u16::MAX as i64 => *n as u16,
+        None => DEFAULT_PORT,
+        Some(_) => return Err(()),
+    };
+    cfg.port(port);
+
+    match kw.get("user") {
+        Some(Value::String(s)) => {
+            cfg.user(s);
+        }
+        _ => return Err(()),
+    }
+
+    if let Some(Value::String(s)) = kw.get("password") {
+        cfg.password(s);
+    }
+
+    match kw.get("database") {
+        Some(Value::String(s)) => {
+            cfg.dbname(s);
+        }
+        _ => return Err(()),
+    }
+
+    let timeout = match kw.get("timeout") {
+        Some(Value::Number(n)) if *n > 0 => Duration::from_millis(*n as u64),
+        _ => DEFAULT_CONNECT_TIMEOUT,
+    };
+    cfg.connect_timeout(timeout);
+
+    Ok((cfg, timeout))
+}
+
 /// True if a connect-time outcome warrants retrying within the timeout
 /// budget. Anything that came back as a `connect` variant (auth failed,
 /// bad database) is a real server response and is surfaced immediately.
@@ -284,8 +288,8 @@ impl Connected {
     }
 
     async fn disconnect(self) -> (PgMode, RunOutcome) {
-        self.conn_task.abort();
-        drop(self.client);
+        // `Drop for Connected` aborts conn_task and drops the client when
+        // `self` goes out of scope at the end of this function.
         (
             PgMode::Disconnected(Disconnected),
             RunOutcome::Ok(Dict::new()),
@@ -293,8 +297,6 @@ impl Connected {
     }
 
     async fn teardown(self) -> (PgMode, TeardownOutcome) {
-        self.conn_task.abort();
-        drop(self.client);
         (PgMode::Disconnected(Disconnected), TeardownOutcome::ok())
     }
 }
