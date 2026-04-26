@@ -67,7 +67,7 @@ Different actor types (ex: postgres client, bash, mqtt, etc.) offer different ac
 
 ### Sigils
 
-A sigil is a tagged literal: `~name` followed by backtick-delimited content, like `~sql`...`` or `~re`...``. The tag picks the sigil — registered sigils today include `sql`, `json`, `hex`, and `re` — which decides what type of value the literal produces and what compile-time checks apply. Backtick content is raw, so escapes like `\.` or `\n` pass through unchanged, which is useful for regex patterns, file paths, and embedded query languages. Plain `"..."` strings are for the regular escape-processed case; sigils are for everything else.
+A sigil is a tagged literal: `~name` followed by backtick-delimited content, like `` ~sql`SELECT 1` `` or `` ~re`^charlie@.+\.org$` ``. The tag picks the sigil — registered sigils today include `sql`, `json`, `hex`, and `re` — which decides what type of value the literal produces and what compile-time checks apply. Backtick content is raw, so escapes like `\.` or `\n` pass through unchanged, which is useful for regex patterns, file paths, and embedded query languages. Plain `"..."` strings are for the regular escape-processed case; sigils are for everything else.
 
 ## FAQ
 

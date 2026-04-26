@@ -1,0 +1,20 @@
+# string escape sequences in double-quoted literals
+#
+# `"..."` strings process backslash escapes: \\ \" \n \t \r \0 \$
+# sigils (`~name` + backticks) keep content raw — see pg_client/assertions.ill
+
+actor args = args_actor
+
+as args:
+  # `\\.` must collapse to `\.` so the regex matches a literal dot.
+  # If escape processing were broken the regex would be `\\.` (literal
+  # backslash + any) and would not match "a.b".
+  assert "a.b" matches "^a\\.b$"
+
+  # `\$` must collapse to `$` so the literal value is `price $5`.
+  # The right-hand regex needs `\\$` to express end-of-string-anchored `$`.
+  assert "price \$5" matches "price \\$5"
+
+  # `\"` must collapse to `"`. If broken, the value would still contain a
+  # backslash before the quote and the regex would fail.
+  assert "say \"hi\"" matches "^say \"hi\"$"

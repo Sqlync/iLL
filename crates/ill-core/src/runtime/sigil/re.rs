@@ -21,9 +21,6 @@ impl Sigil for Re {
 mod tests {
     use super::super::Registry;
     use super::*;
-    use crate::ast::StringFragment;
-    use crate::runtime::eval::Scope;
-    use crate::runtime::Value;
 
     #[test]
     fn registered() {
@@ -31,12 +28,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_backslash_preserved() {
-        let scope = Scope::new();
-        let frags = vec![StringFragment::Text(r"^charlie@.+\.org$".into())];
-        assert_eq!(
-            Re.eval(&frags, &scope).unwrap(),
-            Value::String(r"^charlie@.+\.org$".into())
-        );
+    fn declares_string_output() {
+        assert_eq!(Re.output_type(), ValueType::String);
     }
 }

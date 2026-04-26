@@ -23,6 +23,10 @@ pub enum LowerError {
         text: String,
         span: Span,
     },
+    InvalidEscape {
+        message: String,
+        span: Span,
+    },
     TreeSitterError {
         span: Span,
     },
@@ -55,6 +59,9 @@ impl std::fmt::Display for LowerError {
                     "invalid literal `{}` at {}..{}",
                     text, span.start, span.end
                 )
+            }
+            LowerError::InvalidEscape { message, span } => {
+                write!(f, "{} at {}..{}", message, span.start, span.end)
             }
             LowerError::TreeSitterError { span } => {
                 write!(f, "parse error at {}..{}", span.start, span.end)
@@ -741,8 +748,8 @@ impl<'a> LowerCtx<'a> {
             if let StringFragment::Text(t) = frag {
                 match unescape(t) {
                     Ok(s) => *t = s,
-                    Err(text) => self.errors.push(LowerError::InvalidLiteral {
-                        text,
+                    Err(message) => self.errors.push(LowerError::InvalidEscape {
+                        message,
                         span: self.span(node),
                     }),
                 }
@@ -892,83 +899,6 @@ mod tests {
         assert_eq!(normalize("\tcmd"), "  cmd\n");
     }
 
-    // ── unescape() ────────────────────────────────────────────────────────
-
-    #[test]
-    fn unescape_backslash() {
-        assert_eq!(unescape(r"a\\b").unwrap(), r"a\b");
-    }
-
-    #[test]
-    fn unescape_regex_dot() {
-        assert_eq!(unescape(r"^x\\.org$").unwrap(), r"^x\.org$");
-    }
-
-    #[test]
-    fn unescape_quote() {
-        assert_eq!(unescape(r#"say \"hi\""#).unwrap(), r#"say "hi""#);
-    }
-
-    #[test]
-    fn unescape_newline_tab_cr_null() {
-        assert_eq!(unescape(r"a\nb\tc\rd\0e").unwrap(), "a\nb\tc\rd\0e");
-    }
-
-    #[test]
-    fn unescape_dollar() {
-        assert_eq!(unescape(r"price \$5").unwrap(), "price $5");
-    }
-
-    #[test]
-    fn unescape_unknown_escape_errors() {
-        assert!(unescape(r"\q").is_err());
-    }
-
-    #[test]
-    fn unescape_dangling_backslash_errors() {
-        assert!(unescape("trailing\\").is_err());
-    }
-
-    #[test]
-    fn unescape_no_escapes_passthrough() {
-        assert_eq!(unescape("plain text").unwrap(), "plain text");
-    }
-
-    // ── string-literal lowering integrates unescape ────────────────────────
-
-    #[test]
-    fn double_quoted_string_unescapes() {
-        // End-to-end check that lower_string_fragments runs unescape on
-        // double-quoted strings — the var default `"a\\b"` should arrive as
-        // the two-char string `a\b`.
-        let source = "\
-actor a = args_actor,
-  vars:
-    name: \"a\\\\b\",
-";
-        let file = lower(source).expect("should lower");
-        match &file.items[0] {
-            TopLevel::ActorDeclaration(decl) => {
-                let default = decl.vars[0].default.as_ref().expect("default expr");
-                let Expr::StringLit(lit) = default else {
-                    panic!("expected string literal, got {default:?}");
-                };
-                // Grammar splits text on escape boundaries; concatenate to
-                // see the post-unescape value the runtime would build.
-                let combined: String = lit
-                    .fragments
-                    .iter()
-                    .map(|f| match f {
-                        StringFragment::Text(t) => t.as_str(),
-                        _ => "",
-                    })
-                    .collect();
-                assert_eq!(combined, r"a\b");
-            }
-            _ => panic!("expected actor declaration"),
-        }
-    }
-
     #[test]
     fn normalize_preserves_internal_blank_lines() {
         assert_eq!(normalize("a\n\nb\n"), "a\n\nb\n");
@@ -1055,5 +985,101 @@ actor args = args_actor,
                 paths.len()
             );
         }
+    }
+
+    // ── unescape() ────────────────────────────────────────────────────────
+
+    #[test]
+    fn unescape_backslash() {
+        assert_eq!(unescape(r"a\\b").unwrap(), r"a\b");
+    }
+
+    #[test]
+    fn unescape_regex_dot() {
+        assert_eq!(unescape(r"^x\\.org$").unwrap(), r"^x\.org$");
+    }
+
+    #[test]
+    fn unescape_quote() {
+        assert_eq!(unescape(r#"say \"hi\""#).unwrap(), r#"say "hi""#);
+    }
+
+    #[test]
+    fn unescape_newline_tab_cr_null() {
+        assert_eq!(unescape(r"a\nb\tc\rd\0e").unwrap(), "a\nb\tc\rd\0e");
+    }
+
+    #[test]
+    fn unescape_dollar() {
+        assert_eq!(unescape(r"price \$5").unwrap(), "price $5");
+    }
+
+    #[test]
+    fn unescape_unknown_escape_errors() {
+        assert!(unescape(r"\q").is_err());
+    }
+
+    #[test]
+    fn unescape_dangling_backslash_errors() {
+        assert!(unescape("trailing\\").is_err());
+    }
+
+    #[test]
+    fn unescape_no_escapes_passthrough() {
+        assert_eq!(unescape("plain text").unwrap(), "plain text");
+    }
+
+    // ── string-literal lowering integrates unescape ────────────────────────
+
+    #[test]
+    fn double_quoted_string_unescapes() {
+        // End-to-end check that lower_string_fragments runs unescape on
+        // double-quoted strings — the var default `"a\\b"` should arrive as
+        // the two-char string `a\b`.
+        let source = "\
+actor a = args_actor,
+  vars:
+    name: \"a\\\\b\",
+";
+        let file = lower(source).expect("should lower");
+        match &file.items[0] {
+            TopLevel::ActorDeclaration(decl) => {
+                let default = decl.vars[0].default.as_ref().expect("default expr");
+                let Expr::StringLit(lit) = default else {
+                    panic!("expected string literal, got {default:?}");
+                };
+                // Grammar splits text on escape boundaries; concatenate to
+                // see the post-unescape value the runtime would build.
+                let combined: String = lit
+                    .fragments
+                    .iter()
+                    .map(|f| match f {
+                        StringFragment::Text(t) => t.as_str(),
+                        _ => "",
+                    })
+                    .collect();
+                assert_eq!(combined, r"a\b");
+            }
+            _ => panic!("expected actor declaration"),
+        }
+    }
+
+    #[test]
+    fn invalid_escape_surfaces_as_diagnostic() {
+        // Confirms the bad-escape error reaches the user with a readable
+        // message — no "invalid literal `unknown escape...`" double-wrapping.
+        let source = "\
+actor a = args_actor,
+  vars:
+    name: \"oops \\q here\",
+";
+        let errs = lower(source).expect_err("should fail to lower");
+        let rendered: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+        assert!(
+            rendered.iter().any(|s| s.contains("unknown escape sequence")
+                && s.contains("\\q")
+                && !s.contains("invalid literal")),
+            "expected a clean InvalidEscape diagnostic, got: {rendered:?}"
+        );
     }
 }
