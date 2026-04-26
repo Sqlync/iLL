@@ -20,9 +20,11 @@ pub fn build_result_dict(rows: &[Row]) -> Dict {
     let columns = rows.first().map(|r| r.columns()).unwrap_or(&[]);
     let col_count = columns.len();
 
-    // Build cells once; accumulate row-major and column-major in lockstep
-    // so the cell values aren't cloned. `col` preserves declared column
-    // order because `Dict` is an `IndexMap`.
+    // Build cells once and fan them out into both views in the same
+    // pass — saves a second walk over the result set per column. Cells
+    // are still cloned into the column buckets (Value isn't refcounted),
+    // so this is a time win, not a memory one. `col` preserves declared
+    // column order because `Dict` is an `IndexMap`.
     let mut row_values: Vec<Value> = Vec::with_capacity(rows.len());
     let mut col_buckets: Vec<Vec<Value>> = (0..col_count)
         .map(|_| Vec::with_capacity(rows.len()))
