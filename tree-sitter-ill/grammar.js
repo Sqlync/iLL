@@ -265,7 +265,7 @@ module.exports = grammar({
         "`",
       ),
 
-    sigil_name: (_) => choice("sql", "json", "hex"),
+    sigil_name: (_) => choice("sql", "json", "hex", "re"),
 
     // Same lone-$ fix as string_content.
     sigil_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),

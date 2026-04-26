@@ -1340,6 +1340,10 @@
         {
           "type": "STRING",
           "value": "hex"
+        },
+        {
+          "type": "STRING",
+          "value": "re"
         }
       ]
     },

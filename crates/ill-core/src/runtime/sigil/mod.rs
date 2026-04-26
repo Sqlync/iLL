@@ -16,10 +16,12 @@ use super::{RuntimeError, Value};
 
 mod hex;
 mod json;
+mod re;
 mod sql;
 
 use hex::Hex;
 use json::Json;
+use re::Re;
 use sql::Sql;
 
 pub trait Sigil: Send + Sync {
@@ -86,6 +88,7 @@ impl Registry {
         r.register(&Sql);
         r.register(&Json);
         r.register(&Hex);
+        r.register(&Re);
         r
     }
 

@@ -1089,6 +1089,10 @@
     "named": false
   },
   {
+    "type": "re",
+    "named": false
+  },
+  {
     "type": "sigil_content",
     "named": true
   },

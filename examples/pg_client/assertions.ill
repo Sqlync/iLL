@@ -69,8 +69,8 @@ as alice:
 
   # --- matches (regex) ---
   query ~sql`SELECT email FROM users WHERE name = 'charlie'`
-  assert ok.row[0][0] matches "^charlie@.+\\.org$"
-  assert ok.row[0][0] !matches "^alice"
+  assert ok.row[0][0] matches ~re`^charlie@.+\.org$`
+  assert ok.row[0][0] !matches ~re`^alice`
 
   # --- comparisons on query results ---
   query ~sql`SELECT score FROM users WHERE name = 'alice'`
