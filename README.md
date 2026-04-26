@@ -65,6 +65,10 @@ Actors have member variables, much like classes or structs in other languages. T
 
 Different actor types (ex: postgres client, bash, mqtt, etc.) offer different actions depending on what "mode" they are in. For example, a postgres client may be in a "disconnected" mode and unable to run queries until it connects to a postgres server, at which point it will be in a "connected" mode and able to run queries. The iLL compiler is aware of this transition and can provide useful functionality like catching errors at compile time and providing hints to IDEs.
 
+### Sigils
+
+A sigil is a tagged literal: `~name` followed by backtick-delimited content, like `~sql`...`` or `~re`...``. The tag picks the sigil — registered sigils today include `sql`, `json`, `hex`, and `re` — which decides what type of value the literal produces and what compile-time checks apply. Backtick content is raw, so escapes like `\.` or `\n` pass through unchanged, which is useful for regex patterns, file paths, and embedded query languages. Plain `"..."` strings are for the regular escape-processed case; sigils are for everything else.
+
 ## FAQ
 
 ### Why not just use Python (ruby, etc.)?
