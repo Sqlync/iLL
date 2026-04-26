@@ -65,6 +65,31 @@ impl std::fmt::Display for LowerError {
 
 impl std::error::Error for LowerError {}
 
+/// Process backslash escape sequences in a double-quoted string fragment.
+/// Sigils and single-quoted strings are raw and skip this pass.
+fn unescape(s: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some('$') => out.push('$'),
+            Some(c) => return Err(format!("unknown escape sequence `\\{c}`")),
+            None => return Err("dangling backslash at end of string".to_string()),
+        }
+    }
+    Ok(out)
+}
+
 // ── Input normalization ────────────────────────────────────────────────────────
 
 /// Normalize source text before handing it to tree-sitter.
@@ -711,7 +736,19 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_string_fragments(&mut self, node: tree_sitter::Node) -> Vec<StringFragment> {
-        self.collect_fragments(node, "string_content")
+        let mut fragments = self.collect_fragments(node, "string_content");
+        for frag in fragments.iter_mut() {
+            if let StringFragment::Text(t) = frag {
+                match unescape(t) {
+                    Ok(s) => *t = s,
+                    Err(text) => self.errors.push(LowerError::InvalidLiteral {
+                        text,
+                        span: self.span(node),
+                    }),
+                }
+            }
+        }
+        fragments
     }
 
     /// Collect `{text_kind | interpolation}*` children into a fragment list.
@@ -853,6 +890,83 @@ mod tests {
     fn normalize_tabs() {
         // Two-space expansion matching scanner TAB_WIDTH = 2
         assert_eq!(normalize("\tcmd"), "  cmd\n");
+    }
+
+    // ── unescape() ────────────────────────────────────────────────────────
+
+    #[test]
+    fn unescape_backslash() {
+        assert_eq!(unescape(r"a\\b").unwrap(), r"a\b");
+    }
+
+    #[test]
+    fn unescape_regex_dot() {
+        assert_eq!(unescape(r"^x\\.org$").unwrap(), r"^x\.org$");
+    }
+
+    #[test]
+    fn unescape_quote() {
+        assert_eq!(unescape(r#"say \"hi\""#).unwrap(), r#"say "hi""#);
+    }
+
+    #[test]
+    fn unescape_newline_tab_cr_null() {
+        assert_eq!(unescape(r"a\nb\tc\rd\0e").unwrap(), "a\nb\tc\rd\0e");
+    }
+
+    #[test]
+    fn unescape_dollar() {
+        assert_eq!(unescape(r"price \$5").unwrap(), "price $5");
+    }
+
+    #[test]
+    fn unescape_unknown_escape_errors() {
+        assert!(unescape(r"\q").is_err());
+    }
+
+    #[test]
+    fn unescape_dangling_backslash_errors() {
+        assert!(unescape("trailing\\").is_err());
+    }
+
+    #[test]
+    fn unescape_no_escapes_passthrough() {
+        assert_eq!(unescape("plain text").unwrap(), "plain text");
+    }
+
+    // ── string-literal lowering integrates unescape ────────────────────────
+
+    #[test]
+    fn double_quoted_string_unescapes() {
+        // End-to-end check that lower_string_fragments runs unescape on
+        // double-quoted strings — the var default `"a\\b"` should arrive as
+        // the two-char string `a\b`.
+        let source = "\
+actor a = args_actor,
+  vars:
+    name: \"a\\\\b\",
+";
+        let file = lower(source).expect("should lower");
+        match &file.items[0] {
+            TopLevel::ActorDeclaration(decl) => {
+                let default = decl.vars[0].default.as_ref().expect("default expr");
+                let Expr::StringLit(lit) = default else {
+                    panic!("expected string literal, got {default:?}");
+                };
+                // Grammar splits text on escape boundaries; concatenate to
+                // see the post-unescape value the runtime would build.
+                let combined: String = lit
+                    .fragments
+                    .iter()
+                    .map(|f| match f {
+                        StringFragment::Text(t) => t.as_str(),
+                        _ => "",
+                    })
+                    .collect();
+                assert_eq!(combined, r"a\b");
+            }
+            _ => panic!("expected actor declaration"),
+        }
     }
 
     #[test]
