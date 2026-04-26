@@ -2,7 +2,7 @@ actor db = container,
   image: "postgres:18"
   vars:
     @access read
-    port: 12345
+    port: 5432
 actor alice = pg_client
 
 as db:
@@ -25,12 +25,12 @@ as alice:
 
   # check a single row
   query ~sql`SELECT * FROM users WHERE id = 1`
-  assert ok.cell[0] == [1, "alice"]
+  assert ok.row[0] == [1, "alice"]
 
   # check multiple rows
   query ~sql`SELECT * FROM users ORDER BY id`
-  assert ok.cell[0] == [1, "alice"]
-  assert ok.cell[1] == [2, "bob"]
+  assert ok.row[0] == [1, "alice"]
+  assert ok.row[1] == [2, "bob"]
 
   # check result set shape
   assert ok.row_count == 2
@@ -42,14 +42,14 @@ as alice:
 
   # check a specific cell
   query ~sql`SELECT name FROM users WHERE id = 2`
-  assert ok.cell[0, 0] == "bob"
+  assert ok.row[0][0] == "bob"
 
   # capture a value and reuse it
   query ~sql`SELECT id FROM users WHERE name = 'alice'`
-  let alice_id = ok.cell[0, 0]
+  let alice_id = ok.row[0][0]
 
   query ~sql`SELECT * FROM users WHERE id = ${alice_id}`
-  assert ok.cell[0] == [1, "alice"]
+  assert ok.row[0] == [1, "alice"]
 
   # expected errors
   # note: we are not using a ~sql sigil, because we don't want to evaluate the statement

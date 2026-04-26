@@ -2,7 +2,7 @@ actor db = container,
   image: "postgres:18"
   vars:
     @access read
-    port: 12345
+    port: 5432
 actor alice = pg_client
 
 as db:

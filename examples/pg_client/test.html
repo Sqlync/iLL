@@ -91,7 +91,7 @@
 
   <span class="ann">@expect</span> <span class="str">"Alice should be in the database, with correct name and email"</span>
   <span class="func">query</span> <span class="str">~sql`</span><span class="sql-kw">SELECT</span> <span class="sql-ident">name</span>, <span class="sql-ident">email</span> <span class="sql-kw">FROM</span> <span class="sql-ident">users</span> <span class="sql-kw">WHERE</span> <span class="sql-ident">id</span> = ${alice.user_id}<span class="str">`</span>
-  <span class="kw">assert</span> ok.cell[<span class="num">0</span>] == [<span class="str">"alice"</span>, <span class="str">"alice@example.com"</span>]
+  <span class="kw">assert</span> ok.row[<span class="num">0</span>] == [<span class="str">"alice"</span>, <span class="str">"alice@example.com"</span>]
 
 </pre>
 </body>

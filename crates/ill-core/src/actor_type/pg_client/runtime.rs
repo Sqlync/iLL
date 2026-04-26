@@ -26,7 +26,11 @@ use crate::runtime::{
     CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value,
 };
 
-const DEFAULT_HOST: &str = "localhost";
+// `127.0.0.1` rather than `localhost`: on systems where `localhost` resolves
+// to both `::1` and `127.0.0.1`, tokio-postgres may stall on the IPv6 attempt
+// when Docker forwards container ports on IPv4 only — burning the connect
+// timeout budget for nothing. A literal IPv4 address sidesteps the DNS race.
+const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 5432;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -591,7 +595,7 @@ mod tests {
         );
         assert_eq!(ok.get("row_count"), Some(&Value::Number(2)));
         assert_eq!(ok.get("col_count"), Some(&Value::Number(2)));
-        match ok.get("cell") {
+        match ok.get("row") {
             Some(Value::Array(rows)) => {
                 assert_eq!(rows.len(), 2);
                 match &rows[0] {
@@ -599,10 +603,10 @@ mod tests {
                         assert_eq!(cells[0], Value::Number(1));
                         assert_eq!(cells[1], Value::String("alice".into()));
                     }
-                    other => panic!("cell[0] not an array: {other:?}"),
+                    other => panic!("row[0] not an array: {other:?}"),
                 }
             }
-            other => panic!("ok.cell not an array: {other:?}"),
+            other => panic!("ok.row not an array: {other:?}"),
         }
 
         // disconnect returns to Disconnected
@@ -790,7 +794,7 @@ as alice:
   query ~sql`CREATE TABLE users (id INT, name TEXT)`
   query ~sql`INSERT INTO users VALUES (1, 'alice')`
   query ~sql`SELECT * FROM users WHERE id = 1`
-  assert ok.cell[0] == [1, \"alice\"]
+  assert ok.row[0] == [1, \"alice\"]
 ";
 
         let report = run_test_file(Path::new("e2e.ill"), src).await;

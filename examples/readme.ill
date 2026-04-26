@@ -56,4 +56,4 @@ as bob:
 
   @expect "Alice should be in the database, with correct name and email"
   query ~sql`SELECT name, email FROM users WHERE id = ${alice.user_id}`
-  assert ok.cell[0] == ["alice", "alice@example.com"]
+  assert ok.row[0] == ["alice", "alice@example.com"]

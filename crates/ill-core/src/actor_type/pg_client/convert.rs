@@ -12,10 +12,9 @@ use tokio_postgres::Row;
 
 use crate::runtime::{Dict, Value};
 
-/// Build the structured `ok.*` dict for a query result: `cell`, `col`,
-/// `row_count`, `col_count`. `cell` is the 2D array — `cell[i]` is row
-/// `i`, `cell[i, j]` is that row's `j`th cell (multi-arg indexing folds
-/// into repeated single-arg indexing).
+/// Build the structured `ok.*` dict for a query result: `row`, `col`,
+/// `row_count`, `col_count`. `row` is the 2D array — `row[i]` is row
+/// `i`, `row[i][j]` is that row's `j`th cell.
 pub fn build_result_dict(rows: &[Row]) -> Dict {
     let col_count = rows.first().map(|r| r.columns().len()).unwrap_or(0);
     let col_names: Vec<String> = rows
@@ -49,7 +48,7 @@ pub fn build_result_dict(rows: &[Row]) -> Dict {
     }
 
     let mut out = Dict::new();
-    out.insert("cell".into(), Value::Array(row_values));
+    out.insert("row".into(), Value::Array(row_values));
     out.insert("col".into(), Value::Dict(col_dict));
     out.insert("row_count".into(), Value::Number(rows.len() as i64));
     out.insert("col_count".into(), Value::Number(col_count as i64));

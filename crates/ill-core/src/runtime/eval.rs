@@ -1,7 +1,7 @@
 // Expression evaluator. Phase 5 supports what exec examples need: literals,
 // idents resolved against a scope, member access on Dicts, plain string
 // concatenation of fragments, and indexing into arrays and dicts (used by
-// query-result assertions like `ok.cell[0]`, `ok.col["name"]`, `ok.cell[i, j]`).
+// query-result assertions like `ok.row[0]`, `ok.col["name"]`, `ok.row[i][j]`).
 // Sigils dispatch through `runtime::sigil::Registry`. `let parse` is still
 // deferred — it returns an Eval error so the test fails clearly if an example
 // outgrows this subset.
