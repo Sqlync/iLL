@@ -265,7 +265,7 @@ module.exports = grammar({
         "`",
       ),
 
-    squiggle_name: (_) => choice("sql", "json", "hex", "re"),
+    squiggle_name: ($) => $.identifier,
 
     // Same lone-$ fix as string_content.
     squiggle_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),

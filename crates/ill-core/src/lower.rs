@@ -866,6 +866,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn lower_squiggle_with_arbitrary_name() {
+        // Squiggle names are an open set at the grammar level — any identifier
+        // works. Whether it's a *known* squiggle is a validate-time concern.
+        let source = "actor a = container\nas a:\n  cmd ~yaml`hello`\n";
+        let file = lower(source).expect("arbitrary squiggle name should lower");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+        let cmd = match &as_block.body[0] {
+            Statement::Command(c) => c,
+            _ => panic!("expected command"),
+        };
+        let sq = match &cmd.positional_args[0] {
+            Expr::Squiggle(s) => s,
+            _ => panic!("expected squiggle expression"),
+        };
+        assert_eq!(sq.name.name, "yaml");
+        assert_eq!(sq.fragments.len(), 1);
+        match &sq.fragments[0] {
+            StringFragment::Text(t) => assert_eq!(t, "hello"),
+            _ => panic!("expected text fragment"),
+        }
+    }
+
     // ── normalize() ────────────────────────────────────────────────────────
 
     #[test]

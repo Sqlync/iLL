@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
-use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, TopLevel};
+use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
 use crate::runtime::squiggle::Registry as SquiggleRegistry;
@@ -57,6 +57,7 @@ pub fn validate(source: &SourceFile) -> Vec<Diagnostic> {
         diagnostics: Vec::new(),
     };
     v.run(source);
+    check_squiggles_in_source(source, &mut v.diagnostics);
     v.diagnostics
 }
 
@@ -418,6 +419,110 @@ impl<'r> Validator<'r> {
     }
 }
 
+/// Walk every expression in the source and flag squiggles whose name isn't in
+/// the registry. Squiggles are an open set at the grammar level (any
+/// `~ident\`...\``parses), so unknown names must be caught here rather than at
+/// runtime.
+fn check_squiggles_in_source(source: &SourceFile, diags: &mut Vec<Diagnostic>) {
+    for item in &source.items {
+        match item {
+            TopLevel::ActorDeclaration(decl) => {
+                for kw in &decl.keyword_args {
+                    check_squiggles_in_kwvalue(&kw.value, diags);
+                }
+                for var in &decl.vars {
+                    if let Some(d) = &var.default {
+                        check_squiggles_in_expr(d, diags);
+                    }
+                }
+            }
+            TopLevel::AsBlock(block) => {
+                for stmt in &block.body {
+                    match stmt {
+                        Statement::Command(cmd) => {
+                            for arg in &cmd.positional_args {
+                                check_squiggles_in_expr(arg, diags);
+                            }
+                            for kw in &cmd.keyword_args {
+                                check_squiggles_in_kwvalue(&kw.value, diags);
+                            }
+                        }
+                        Statement::Assert(a) => {
+                            check_squiggles_in_expr(&a.left, diags);
+                            if let Some(r) = &a.right {
+                                check_squiggles_in_expr(r, diags);
+                            }
+                        }
+                        Statement::Let(l) => match &l.value {
+                            ast::LetValue::Expr(e) => check_squiggles_in_expr(e, diags),
+                            ast::LetValue::Parse { source, .. } => {
+                                check_squiggles_in_expr(source, diags)
+                            }
+                        },
+                        Statement::Assignment(a) => {
+                            check_squiggles_in_expr(&a.target, diags);
+                            check_squiggles_in_expr(&a.value, diags);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_squiggles_in_kwvalue(value: &ast::KeywordValue, diags: &mut Vec<Diagnostic>) {
+    match value {
+        ast::KeywordValue::Expr(e) => check_squiggles_in_expr(e, diags),
+        ast::KeywordValue::Map(pairs) => {
+            for (k, v) in pairs {
+                check_squiggles_in_expr(k, diags);
+                check_squiggles_in_expr(v, diags);
+            }
+        }
+    }
+}
+
+fn check_squiggles_in_expr(expr: &Expr, diags: &mut Vec<Diagnostic>) {
+    match expr {
+        Expr::Squiggle(s) => {
+            if SquiggleRegistry::global().get(&s.name.name).is_none() {
+                diags.push(Diagnostic::error(
+                    s.name.span,
+                    DiagnosticCode::UnknownSquiggle,
+                    format!("unknown squiggle `~{}`", s.name.name),
+                ));
+            }
+            for frag in &s.fragments {
+                if let StringFragment::Interpolation(e) = frag {
+                    check_squiggles_in_expr(e, diags);
+                }
+            }
+        }
+        Expr::StringLit(lit) => {
+            for frag in &lit.fragments {
+                if let StringFragment::Interpolation(e) = frag {
+                    check_squiggles_in_expr(e, diags);
+                }
+            }
+        }
+        Expr::Array(items) => {
+            for e in items {
+                check_squiggles_in_expr(e, diags);
+            }
+        }
+        Expr::MemberAccess { object, .. } => check_squiggles_in_expr(object, diags),
+        Expr::Index {
+            object, indices, ..
+        } => {
+            check_squiggles_in_expr(object, diags);
+            for e in indices {
+                check_squiggles_in_expr(e, diags);
+            }
+        }
+        Expr::Ident(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Atom(_) => {}
+    }
+}
+
 fn resolve_outcome_chain(
     expr: &Expr,
     last_ok_fields: &'static [OutcomeField],
@@ -543,6 +648,19 @@ mod tests {
     fn unknown_actor_type_is_flagged() {
         let src = "actor bob = nope_actor\n";
         assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownActorType]);
+    }
+
+    #[test]
+    fn unknown_squiggle_is_flagged() {
+        let src = "\
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+  query ~yaml`SELECT 1`
+";
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownSquiggle]);
     }
 
     #[test]
