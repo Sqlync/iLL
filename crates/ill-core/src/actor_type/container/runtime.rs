@@ -71,10 +71,6 @@ pub struct ContainerInstance {
     image_name: String,
     image_tag: String,
     mode: ContainerMode,
-    /// Member variables surfaced by `self_view`. Seeded from `args.vars` at
-    /// construct time. After a successful `run`, the `port` entry (if
-    /// declared) is overwritten with the live host port testcontainers
-    /// mapped — that's what other actors read via `<container>.port`.
     members: Dict,
 }
 
@@ -373,12 +369,12 @@ fn value_as_u16(v: &Value) -> Option<u16> {
 }
 
 /// Build the initial member-var dict from the actor declaration. Vars
-/// without a default surface as `Value::Unit` so `self.<name>` resolves
+/// without a default surface as `Value::Unset` so `self.<name>` resolves
 /// to "not yet set" rather than failing the lookup outright.
 fn build_members(vars: &[DeclaredVar]) -> Dict {
     let mut out = Dict::new();
     for v in vars {
-        out.insert(v.name.clone(), v.default.clone().unwrap_or(Value::Unit));
+        out.insert(v.name.clone(), v.default.clone().unwrap_or(Value::Unset));
     }
     out
 }
@@ -523,7 +519,7 @@ mod tests {
         ];
         let m = build_members(&vars);
         assert_eq!(m.get("port"), Some(&Value::Number(8080)));
-        assert_eq!(m.get("name"), Some(&Value::Unit));
+        assert_eq!(m.get("name"), Some(&Value::Unset));
     }
 
     // ── Docker-gated tests ─────────────────────────────────────────────────

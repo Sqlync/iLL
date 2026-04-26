@@ -1,8 +1,9 @@
 // Runtime values. Mirrors `ValueType` 1:1 plus `Dict` (for `ok.*` /
-// `error.*` / struct-shaped kwargs), `Unit` (for values not yet available,
-// e.g. `ok.exit` before process teardown), and `Null` (for SQL NULLs and
-// other "absent" values surfaced from external systems — distinct from
-// `Unit`, which is "not yet computed").
+// `error.*` / struct-shaped kwargs), `Unset` (for values not yet
+// produced, e.g. `ok.exit` before process teardown, or a member var the
+// user never assigned), and `Null` (for SQL NULLs and other "absent"
+// values surfaced from external systems — distinct from `Unset`, which
+// is "not yet computed").
 //
 // `Dict` is an `IndexMap` so field iteration follows insertion order. That
 // matters for positional access like `ok.col[0]` on query results, where the
@@ -31,9 +32,13 @@ pub enum Value {
     Array(Vec<Value>),
     Dict(Dict),
     /// SQL NULL / absent value surfaced from external systems. Distinct from
-    /// `Unit` (which means "not yet available", e.g. `ok.exit` before teardown).
+    /// `Unset` (which means "not yet computed", e.g. `ok.exit` before teardown).
     Null,
-    Unit,
+    /// "Not yet computed" — like a `OnceLock` before `set`. Used for
+    /// outcome fields that fill in over an actor's lifetime (`ok.exit`
+    /// after process teardown) and for declared member vars that haven't
+    /// been assigned yet.
+    Unset,
 }
 
 impl Value {
@@ -48,13 +53,13 @@ impl Value {
             Value::Array(_) => "array",
             Value::Dict(_) => "dict",
             Value::Null => "null",
-            Value::Unit => "unit",
+            Value::Unset => "unset",
         }
     }
 
     /// True if this value is a valid inhabitant of `ty`. `Dynamic` and
     /// `Unknown` are permissive (they match any runtime value); every other
-    /// variant is strict. `Array`/`Dict`/`Null`/`Unit` match no concrete
+    /// variant is strict. `Array`/`Dict`/`Null`/`Unset` match no concrete
     /// `ValueType` — use `Dynamic` to accept them.
     pub fn is_of_type(&self, ty: ValueType) -> bool {
         matches!(
@@ -100,7 +105,7 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Null => write!(f, "null"),
-            Value::Unit => write!(f, "()"),
+            Value::Unset => write!(f, "<unset>"),
         }
     }
 }
