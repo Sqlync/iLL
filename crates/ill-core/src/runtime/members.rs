@@ -32,12 +32,6 @@ impl Members {
         Self { slots }
     }
 
-    pub fn empty() -> Self {
-        Self {
-            slots: BTreeMap::new(),
-        }
-    }
-
     /// Returns `Some(&v)` only when the slot is both declared and assigned.
     /// Use `is_declared` to distinguish "declared but unset" from "never
     /// declared."

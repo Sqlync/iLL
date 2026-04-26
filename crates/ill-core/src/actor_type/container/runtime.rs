@@ -102,8 +102,9 @@ impl ContainerInstance {
     pub async fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
         let image_kw = args.kw("image");
         let dockerfile_kw = args.kw("dockerfile");
+        let members = Members::from_declarations(&args.vars);
 
-        let mut instance = match (image_kw, dockerfile_kw) {
+        match (image_kw, dockerfile_kw) {
             (Some(_), Some(_)) => Err(RuntimeError::Construct(
                 "container requires exactly one of `image:` or `dockerfile:`, not both".to_string(),
             )),
@@ -112,7 +113,7 @@ impl ContainerInstance {
             )),
 
             (Some(value), None) => match value {
-                Value::String(image_ref) => prepare_from_image(image_ref).await,
+                Value::String(image_ref) => prepare_from_image(image_ref, members).await,
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
                     got: other.type_name(),
@@ -122,7 +123,7 @@ impl ContainerInstance {
 
             (None, Some(value)) => match value {
                 Value::String(path_ref) => {
-                    prepare_from_dockerfile(path_ref, &args.source_dir).await
+                    prepare_from_dockerfile(path_ref, &args.source_dir, members).await
                 }
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
@@ -130,13 +131,14 @@ impl ContainerInstance {
                     context: "container `dockerfile`".into(),
                 }),
             },
-        }?;
-        instance.members = Members::from_declarations(&args.vars);
-        Ok(instance)
+        }
     }
 }
 
-async fn prepare_from_image(image_ref: &str) -> Result<ContainerInstance, RuntimeError> {
+async fn prepare_from_image(
+    image_ref: &str,
+    members: Members,
+) -> Result<ContainerInstance, RuntimeError> {
     let (name, tag) = split_image_ref(image_ref);
 
     // Eager pull. We discard the returned ContainerRequest — the image is
@@ -151,13 +153,14 @@ async fn prepare_from_image(image_ref: &str) -> Result<ContainerInstance, Runtim
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
-        members: Members::empty(),
+        members,
     })
 }
 
 async fn prepare_from_dockerfile(
     dockerfile: &str,
     source_dir: &Path,
+    members: Members,
 ) -> Result<ContainerInstance, RuntimeError> {
     let resolved = source_dir.join(dockerfile);
     if !resolved.is_file() {
@@ -185,7 +188,7 @@ async fn prepare_from_dockerfile(
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
-        members: Members::empty(),
+        members,
     })
 }
 
