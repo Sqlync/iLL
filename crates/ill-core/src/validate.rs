@@ -57,7 +57,6 @@ pub fn validate(source: &SourceFile) -> Vec<Diagnostic> {
         diagnostics: Vec::new(),
     };
     v.run(source);
-    check_squiggles_in_source(source, &mut v.diagnostics);
     v.diagnostics
 }
 
@@ -106,6 +105,9 @@ impl<'r> Validator<'r> {
             decl.span,
             None,
         );
+        for kw in &decl.keyword_args {
+            self.check_squiggles_in_kwvalue(&kw.value);
+        }
 
         // Type comes from the default expression; vars without a default
         // are `Unknown` to the validator. The runtime mirror of this lives
@@ -119,6 +121,9 @@ impl<'r> Validator<'r> {
                 .map(expr_type)
                 .unwrap_or(ValueType::Unknown);
             vars.insert(var.name.name.clone(), ty);
+            if let Some(d) = &var.default {
+                self.check_squiggles_in_expr(d);
+            }
         }
 
         self.actors.insert(
@@ -197,6 +202,7 @@ impl<'r> Validator<'r> {
                                     &mut self.diagnostics,
                                 );
                             }
+                            self.check_squiggles_in_expr(expr);
                             self.expr_type_in_actor(
                                 &block.actor.name,
                                 expr,
@@ -205,18 +211,23 @@ impl<'r> Validator<'r> {
                                 outcome,
                             )
                         }
-                        ast::LetValue::Parse { format, .. } => match format.name.as_str() {
-                            "json" => ValueType::Dynamic,
-                            _ => ValueType::Unknown,
-                        },
+                        ast::LetValue::Parse { source, format } => {
+                            self.check_squiggles_in_expr(source);
+                            match format.name.as_str() {
+                                "json" => ValueType::Dynamic,
+                                _ => ValueType::Unknown,
+                            }
+                        }
                     };
                     if let Some(state) = self.actors.get_mut(&block.actor.name) {
                         state.vars.insert(let_stmt.name.name.clone(), ty);
                     }
                 }
-                Statement::Assignment(_) => {
+                Statement::Assignment(a) => {
                     // TODO: check target var exists, check mutability annotation,
                     // check type. Deferred — needs annotation semantics nailed down.
+                    self.check_squiggles_in_expr(&a.target);
+                    self.check_squiggles_in_expr(&a.value);
                 }
                 Statement::Assert(a) => {
                     let asserts_ok = expr_starts_with_ident(&a.left, "ok");
@@ -225,6 +236,10 @@ impl<'r> Validator<'r> {
                     if asserts_ok || asserts_error {
                         outcome =
                             advance_outcome(outcome, asserts_ok, a.span, &mut self.diagnostics);
+                    }
+                    self.check_squiggles_in_expr(&a.left);
+                    if let Some(r) = &a.right {
+                        self.check_squiggles_in_expr(r);
                     }
                     // TODO: check both sides type-check and are comparable.
                     // Deferred — low-value for Phase 4, high-noise potential.
@@ -309,6 +324,9 @@ impl<'r> Validator<'r> {
                 ),
             ));
         }
+        for arg in &cmd.positional_args {
+            self.check_squiggles_in_expr(arg);
+        }
 
         // Keyword args: required presence + unknown names.
         self.check_keyword_args_against(
@@ -317,6 +335,9 @@ impl<'r> Validator<'r> {
             cmd.span,
             Some(&cmd.name.name),
         );
+        for kw in &cmd.keyword_args {
+            self.check_squiggles_in_kwvalue(&kw.value);
+        }
 
         (
             cmd_def.ok_fields(),
@@ -372,6 +393,38 @@ impl<'r> Validator<'r> {
         }
     }
 
+    // ── Squiggle validation ───────────────────────────────────────────────────
+
+    /// Recurse through `expr` and emit `UnknownSquiggle` for any squiggle
+    /// whose name isn't registered. Squiggles are an open set at the grammar
+    /// level — unknown names are caught here rather than at runtime.
+    fn check_squiggles_in_expr(&mut self, expr: &Expr) {
+        let diags = &mut self.diagnostics;
+        for_each_expr(expr, &mut |e| {
+            if let Expr::Squiggle(s) = e {
+                if SquiggleRegistry::global().get(&s.name.name).is_none() {
+                    diags.push(Diagnostic::error(
+                        s.name.span,
+                        DiagnosticCode::UnknownSquiggle,
+                        format!("unknown squiggle `~{}`", s.name.name),
+                    ));
+                }
+            }
+        });
+    }
+
+    fn check_squiggles_in_kwvalue(&mut self, value: &ast::KeywordValue) {
+        match value {
+            ast::KeywordValue::Expr(e) => self.check_squiggles_in_expr(e),
+            ast::KeywordValue::Map(pairs) => {
+                for (k, v) in pairs {
+                    self.check_squiggles_in_expr(k);
+                    self.check_squiggles_in_expr(v);
+                }
+            }
+        }
+    }
+
     // ── Expression typing (narrow) ────────────────────────────────────────────
 
     fn expr_type_in_actor(
@@ -419,104 +472,38 @@ impl<'r> Validator<'r> {
     }
 }
 
-/// Walk every expression in the source and flag squiggles whose name isn't in
-/// the registry. Squiggles are an open set at the grammar level (any
-/// `~ident\`...\``parses), so unknown names must be caught here rather than at
-/// runtime.
-fn check_squiggles_in_source(source: &SourceFile, diags: &mut Vec<Diagnostic>) {
-    for item in &source.items {
-        match item {
-            TopLevel::ActorDeclaration(decl) => {
-                for kw in &decl.keyword_args {
-                    check_squiggles_in_kwvalue(&kw.value, diags);
-                }
-                for var in &decl.vars {
-                    if let Some(d) = &var.default {
-                        check_squiggles_in_expr(d, diags);
-                    }
-                }
-            }
-            TopLevel::AsBlock(block) => {
-                for stmt in &block.body {
-                    match stmt {
-                        Statement::Command(cmd) => {
-                            for arg in &cmd.positional_args {
-                                check_squiggles_in_expr(arg, diags);
-                            }
-                            for kw in &cmd.keyword_args {
-                                check_squiggles_in_kwvalue(&kw.value, diags);
-                            }
-                        }
-                        Statement::Assert(a) => {
-                            check_squiggles_in_expr(&a.left, diags);
-                            if let Some(r) = &a.right {
-                                check_squiggles_in_expr(r, diags);
-                            }
-                        }
-                        Statement::Let(l) => match &l.value {
-                            ast::LetValue::Expr(e) => check_squiggles_in_expr(e, diags),
-                            ast::LetValue::Parse { source, .. } => {
-                                check_squiggles_in_expr(source, diags)
-                            }
-                        },
-                        Statement::Assignment(a) => {
-                            check_squiggles_in_expr(&a.target, diags);
-                            check_squiggles_in_expr(&a.value, diags);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn check_squiggles_in_kwvalue(value: &ast::KeywordValue, diags: &mut Vec<Diagnostic>) {
-    match value {
-        ast::KeywordValue::Expr(e) => check_squiggles_in_expr(e, diags),
-        ast::KeywordValue::Map(pairs) => {
-            for (k, v) in pairs {
-                check_squiggles_in_expr(k, diags);
-                check_squiggles_in_expr(v, diags);
-            }
-        }
-    }
-}
-
-fn check_squiggles_in_expr(expr: &Expr, diags: &mut Vec<Diagnostic>) {
+/// Visit `expr` and every nested sub-expression in pre-order. Used by
+/// validator passes that need to look at every Expr position uniformly
+/// (e.g. the squiggle-name check).
+fn for_each_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(expr);
     match expr {
         Expr::Squiggle(s) => {
-            if SquiggleRegistry::global().get(&s.name.name).is_none() {
-                diags.push(Diagnostic::error(
-                    s.name.span,
-                    DiagnosticCode::UnknownSquiggle,
-                    format!("unknown squiggle `~{}`", s.name.name),
-                ));
-            }
             for frag in &s.fragments {
                 if let StringFragment::Interpolation(e) = frag {
-                    check_squiggles_in_expr(e, diags);
+                    for_each_expr(e, f);
                 }
             }
         }
         Expr::StringLit(lit) => {
             for frag in &lit.fragments {
                 if let StringFragment::Interpolation(e) = frag {
-                    check_squiggles_in_expr(e, diags);
+                    for_each_expr(e, f);
                 }
             }
         }
         Expr::Array(items) => {
             for e in items {
-                check_squiggles_in_expr(e, diags);
+                for_each_expr(e, f);
             }
         }
-        Expr::MemberAccess { object, .. } => check_squiggles_in_expr(object, diags),
+        Expr::MemberAccess { object, .. } => for_each_expr(object, f),
         Expr::Index {
             object, indices, ..
         } => {
-            check_squiggles_in_expr(object, diags);
+            for_each_expr(object, f);
             for e in indices {
-                check_squiggles_in_expr(e, diags);
+                for_each_expr(e, f);
             }
         }
         Expr::Ident(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Atom(_) => {}
