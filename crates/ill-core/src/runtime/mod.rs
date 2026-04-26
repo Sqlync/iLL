@@ -11,8 +11,11 @@ pub use value::{Dict, Value};
 pub mod assert;
 pub mod eval;
 pub mod harness;
+pub mod members;
 pub mod report;
 pub mod sigil;
+
+pub use members::Members;
 
 // ── Args passed to construct / execute ────────────────────────────────────────
 

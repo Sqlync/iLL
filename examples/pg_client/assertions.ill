@@ -7,14 +7,16 @@ actor db = container,
   image: "postgres:18"
   vars:
     @access read
-    port: 12345
+    port: 5432
 actor alice = pg_client
 
 as db:
   run,
     port: self.port
     env:
+      POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
 
 as alice:
   connect,
@@ -43,11 +45,11 @@ as alice:
   # --- equality ---
   query ~sql`SELECT * FROM users ORDER BY id`
   assert ok.row_count == 3
-  assert ok.cell[0, 1] == "alice"
+  assert ok.row[0][1] == "alice"
 
   # --- inequality ---
   assert ok.row_count != 0
-  assert ok.cell[0, 1] != "bob"
+  assert ok.row[0][1] != "bob"
 
   # --- numeric comparison ---
   assert ok.row_count > 0
@@ -57,8 +59,8 @@ as alice:
 
   # --- contains (string) ---
   query ~sql`SELECT email FROM users WHERE name = 'alice'`
-  assert ok.cell[0, 0] contains "example.com"
-  assert ok.cell[0, 0] !contains "test.org"
+  assert ok.row[0][0] contains "example.com"
+  assert ok.row[0][0] !contains "test.org"
 
   # --- contains (array) ---
   query ~sql`SELECT name FROM users ORDER BY id`
@@ -67,19 +69,19 @@ as alice:
 
   # --- matches (regex) ---
   query ~sql`SELECT email FROM users WHERE name = 'charlie'`
-  assert ok.cell[0, 0] matches "^charlie@.+\\.org$"
-  assert ok.cell[0, 0] !matches "^alice"
+  assert ok.row[0][0] matches "^charlie@.+\\.org$"
+  assert ok.row[0][0] !matches "^alice"
 
   # --- comparisons on query results ---
   query ~sql`SELECT score FROM users WHERE name = 'alice'`
-  let alice_score = ok.cell[0, 0]
+  let alice_score = ok.row[0][0]
   assert alice_score > 0
   assert alice_score >= 42
   assert alice_score <= 42
 
   query ~sql`SELECT score FROM users WHERE name = 'bob'`
-  assert ok.cell[0, 0] < alice_score
+  assert ok.row[0][0] < alice_score
 
   # --- assertions on errors ---
   query "SELEC invalid syntax here"
-  assert error.pg.reason == :syntax_error
+  assert error.query.reason == :syntax_error

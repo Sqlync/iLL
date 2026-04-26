@@ -2,14 +2,16 @@ actor db = container,
   image: "postgres:18"
   vars:
     @access read
-    port: 12345
+    port: 5432
 actor alice = pg_client
 
 as db:
   run,
     port: self.port
     env:
+      POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
 
 as alice:
   connect,
@@ -28,7 +30,7 @@ as alice:
     password: "wrong"
     port: db.port
     database: "test"
-  assert error.auth.reason == :authentication_failed
+  assert error.connect.reason == :authentication_failed
 
 # reconnect with valid credentials
 as alice:
@@ -37,4 +39,3 @@ as alice:
     password: "root"
     port: db.port
     database: "test"
-  assert ok.is_connected

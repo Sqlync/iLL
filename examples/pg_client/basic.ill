@@ -3,7 +3,7 @@ actor db = container,
   image: "postgres:18"
   vars:
     @access read
-    port: 12345
+    port: 5432
 actor alice = pg_client
 
 # start runs the db; it will auto-stop on test completion
@@ -11,7 +11,9 @@ as db:
   run,
     port: self.port
     env:
+      POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
 
 as alice:
   # connect inside "as" connects this actor to the db
@@ -29,7 +31,7 @@ as alice:
   # "error" catches expected failures and allows assertions
   # we aren't using a ~sql sigil, because we don't want to evaluate the statement
   query "SELEC invalid"
-  assert error.pg.reason == :syntax_error
+  assert error.query.reason == :syntax_error
 
   # "ok" refers to the result of a successful command
   query ~sql`SELECT * FROM users WHERE id = 1`
@@ -50,11 +52,11 @@ as alice:
 
   # check a specific cell
   query ~sql`SELECT name FROM users WHERE id = 2`
-  assert ok.cell[0, 0] == "bob"
+  assert ok.row[0][0] == "bob"
 
   # capture a value and reuse it
   query ~sql`SELECT id FROM users WHERE name = 'alice'`
-  let alice_id = ok.cell[0, 0]
+  let alice_id = ok.row[0][0]
 
   query ~sql`SELECT * FROM users WHERE id = ${alice_id}`
   assert ok.row[0] == [1, "alice"]

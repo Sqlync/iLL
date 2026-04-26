@@ -21,7 +21,7 @@ use testcontainers::{
 use super::commands::{ContainerError, RunOk};
 use crate::actor_type::ActorInstance;
 use crate::runtime::{
-    CommandArgs, ConstructArgs, DeclaredVar, Dict, RunOutcome, RuntimeError, TeardownOutcome, Value,
+    CommandArgs, ConstructArgs, Dict, Members, RunOutcome, RuntimeError, TeardownOutcome, Value,
 };
 
 /// Reason atoms surfaced on `error.container.reason`. Run: `:timeout`,
@@ -71,11 +71,7 @@ pub struct ContainerInstance {
     image_name: String,
     image_tag: String,
     mode: ContainerMode,
-    /// Member variables surfaced by `self_view`. Seeded from `args.vars` at
-    /// construct time. After a successful `run`, the `port` entry (if
-    /// declared) is overwritten with the live host port testcontainers
-    /// mapped — that's what other actors read via `<container>.port`.
-    members: Dict,
+    members: Members,
 }
 
 pub enum ContainerMode {
@@ -106,8 +102,9 @@ impl ContainerInstance {
     pub async fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
         let image_kw = args.kw("image");
         let dockerfile_kw = args.kw("dockerfile");
+        let members = Members::from_declarations(&args.vars);
 
-        let mut instance = match (image_kw, dockerfile_kw) {
+        match (image_kw, dockerfile_kw) {
             (Some(_), Some(_)) => Err(RuntimeError::Construct(
                 "container requires exactly one of `image:` or `dockerfile:`, not both".to_string(),
             )),
@@ -116,7 +113,7 @@ impl ContainerInstance {
             )),
 
             (Some(value), None) => match value {
-                Value::String(image_ref) => prepare_from_image(image_ref).await,
+                Value::String(image_ref) => prepare_from_image(image_ref, members).await,
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
                     got: other.type_name(),
@@ -126,7 +123,7 @@ impl ContainerInstance {
 
             (None, Some(value)) => match value {
                 Value::String(path_ref) => {
-                    prepare_from_dockerfile(path_ref, &args.source_dir).await
+                    prepare_from_dockerfile(path_ref, &args.source_dir, members).await
                 }
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
@@ -134,13 +131,14 @@ impl ContainerInstance {
                     context: "container `dockerfile`".into(),
                 }),
             },
-        }?;
-        instance.members = build_members(&args.vars);
-        Ok(instance)
+        }
     }
 }
 
-async fn prepare_from_image(image_ref: &str) -> Result<ContainerInstance, RuntimeError> {
+async fn prepare_from_image(
+    image_ref: &str,
+    members: Members,
+) -> Result<ContainerInstance, RuntimeError> {
     let (name, tag) = split_image_ref(image_ref);
 
     // Eager pull. We discard the returned ContainerRequest — the image is
@@ -155,13 +153,14 @@ async fn prepare_from_image(image_ref: &str) -> Result<ContainerInstance, Runtim
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
-        members: Dict::new(),
+        members,
     })
 }
 
 async fn prepare_from_dockerfile(
     dockerfile: &str,
     source_dir: &Path,
+    members: Members,
 ) -> Result<ContainerInstance, RuntimeError> {
     let resolved = source_dir.join(dockerfile);
     if !resolved.is_file() {
@@ -189,7 +188,7 @@ async fn prepare_from_dockerfile(
         image_name: name,
         image_tag: tag,
         mode: ContainerMode::default(),
-        members: Dict::new(),
+        members,
     })
 }
 
@@ -372,17 +371,6 @@ fn value_as_u16(v: &Value) -> Option<u16> {
     }
 }
 
-/// Build the initial member-var dict from the actor declaration. Vars
-/// without a default surface as `Value::Unit` so `self.<name>` resolves
-/// to "not yet set" rather than failing the lookup outright.
-fn build_members(vars: &[DeclaredVar]) -> Dict {
-    let mut out = Dict::new();
-    for v in vars {
-        out.insert(v.name.clone(), v.default.clone().unwrap_or(Value::Unit));
-    }
-    out
-}
-
 #[async_trait::async_trait]
 impl ActorInstance for ContainerInstance {
     fn type_name(&self) -> &'static str {
@@ -425,13 +413,13 @@ impl ActorInstance for ContainerInstance {
         };
         // Backfill the live host port into `self.port` so other actors that
         // read `<container>.port` get the dynamically-mapped value, not the
-        // declared one. Only overwrites a `port` member that was actually
-        // declared on the actor — silent on actors without a `port` var.
+        // declared one. `Members::set` is a no-op when `port` wasn't
+        // declared on the actor — silent for actors without a `port` var.
         if cmd == "run" {
             if let RunOutcome::Ok(ref ok) = outcome {
                 if let Some(Value::Number(p)) = ok.get("port") {
-                    if *p > 0 && self.members.contains_key("port") {
-                        self.members.insert("port".into(), Value::Number(*p));
+                    if *p > 0 {
+                        let _ = self.members.set("port", Value::Number(*p));
                     }
                 }
             }
@@ -450,13 +438,14 @@ impl ActorInstance for ContainerInstance {
     }
 
     fn self_view(&self) -> Option<Dict> {
-        Some(self.members.clone())
+        Some(self.members.assigned_view())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::DeclaredVar;
 
     #[test]
     fn split_image_ref_bare_name_defaults_to_latest() {
@@ -507,23 +496,6 @@ mod tests {
         assert_eq!(value_as_u16(&Value::Number(-1)), None);
         assert_eq!(value_as_u16(&Value::Number(70_000)), None);
         assert_eq!(value_as_u16(&Value::String("80".into())), None);
-    }
-
-    #[test]
-    fn build_members_seeds_defaults_and_marks_undefaulted_as_unit() {
-        let vars = vec![
-            DeclaredVar {
-                name: "port".into(),
-                default: Some(Value::Number(8080)),
-            },
-            DeclaredVar {
-                name: "name".into(),
-                default: None,
-            },
-        ];
-        let m = build_members(&vars);
-        assert_eq!(m.get("port"), Some(&Value::Number(8080)));
-        assert_eq!(m.get("name"), Some(&Value::Unit));
     }
 
     // ── Docker-gated tests ─────────────────────────────────────────────────
@@ -657,11 +629,16 @@ mod tests {
                 Some(Value::Number(p)) => *p,
                 other => panic!("expected ok.port number, got {other:?}"),
             },
-            other => panic!("expected Ok from run, got {other:?}", other = match other {
-                RunOutcome::Error { variant, fields } => format!("Error({variant}, {fields:?})"),
-                RunOutcome::NotImplemented { actor, cmd } => format!("NotImplemented({actor}, {cmd})"),
-                RunOutcome::Ok(_) => unreachable!(),
-            }),
+            other => panic!(
+                "expected Ok from run, got {other:?}",
+                other = match other {
+                    RunOutcome::Error { variant, fields } =>
+                        format!("Error({variant}, {fields:?})"),
+                    RunOutcome::NotImplemented { actor, cmd } =>
+                        format!("NotImplemented({actor}, {cmd})"),
+                    RunOutcome::Ok(_) => unreachable!(),
+                }
+            ),
         };
         assert!(mapped > 0, "host port should be > 0");
         assert_ne!(mapped, 5432, "host port should differ from container port");
