@@ -7,6 +7,7 @@
 
 actor app = container,
   dockerfile: "languages/python.Dockerfile"
+  internal_port: 8080
   vars:
     @access read
     port: 8080

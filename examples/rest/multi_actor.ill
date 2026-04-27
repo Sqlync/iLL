@@ -1,5 +1,6 @@
 actor api = container,
   dockerfile: "./api.Dockerfile"
+  internal_port: 8080
   vars:
     @access read
     port: 8080

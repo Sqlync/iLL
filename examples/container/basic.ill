@@ -4,6 +4,7 @@
 
 actor nginx = container,
   image: "nginx:latest"
+  internal_port: 80
   vars:
     port: 8080
 

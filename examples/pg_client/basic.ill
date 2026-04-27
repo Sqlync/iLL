@@ -1,6 +1,7 @@
 # declare actors — we'll need one for the database server, one for the database client
 actor db = container,
   image: "postgres:18"
+  internal_port: 5432
   vars:
     @access read
     port: 5432

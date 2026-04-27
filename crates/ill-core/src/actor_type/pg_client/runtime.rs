@@ -768,6 +768,7 @@ mod tests {
         let src = "\
 actor db = container,
   image: \"postgres:18\"
+  internal_port: 5432
   vars:
     @access read
     port: 5432

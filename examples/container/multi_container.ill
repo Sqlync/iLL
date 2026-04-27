@@ -7,12 +7,14 @@
 
 actor backend = container,
   image: "my-backend:latest"
+  internal_port: 8080
   vars:
     @access read
     port: 8080
 
 actor frontend = container,
   image: "my-frontend:latest"
+  internal_port: 3000
   vars:
     @access read
     port: 3000
