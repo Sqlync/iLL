@@ -21,11 +21,11 @@ actor frontend = container,
 
 as backend:
   run,
-    port: self.port
+    external_port: self.port
 
 as frontend:
   run,
-    port: self.port
+    external_port: self.port
     env:
       # read backend.port from the backend actor's member variable
       BACKEND_URL: "http://localhost:${backend.port}"

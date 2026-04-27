@@ -10,7 +10,7 @@ actor bob = http_client
 
 as api:
   run,
-    port: self.port
+    external_port: self.port
 
 as alice:
   post "${api.base}/auth/login",

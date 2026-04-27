@@ -14,7 +14,7 @@ actor client2 = mqtt_client
 
 as broker:
   run,
-    port: self.port
+    external_port: self.port
 
 as client1:
   connect,

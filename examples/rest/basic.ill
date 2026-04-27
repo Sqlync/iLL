@@ -16,7 +16,7 @@ actor alice = http_client
 
 as api:
   run,
-    port: self.port
+    external_port: self.port
 
 as alice:
   # get an existing resource

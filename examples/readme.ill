@@ -27,7 +27,7 @@ as db:
   # Statements can be annotated with documentation, which is surfaced on failure
   @expect "The database needs to start before the REST server and bob's client"
   run,
-    port: self.port
+    external_port: self.port
     env:
       POSTGRES_PASSWORD: "root"
 

@@ -12,6 +12,6 @@ actor nginx = container,
 # env vars are passed directly to the container process
 as nginx:
   run,
-    port: self.port
+    external_port: self.port
     env:
       NGINX_HOST: "localhost"

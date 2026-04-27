@@ -10,7 +10,7 @@ actor echo_server = mqtt_client
 
 as broker:
   run,
-    port: self.port
+    external_port: self.port
 
 as echo_server:
   connect,

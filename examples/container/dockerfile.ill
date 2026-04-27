@@ -15,7 +15,7 @@ actor client = http_client
 
 as app:
   run,
-    port: self.port
+    external_port: self.port
 
 as client:
   get "http://localhost:${app.port}/health"

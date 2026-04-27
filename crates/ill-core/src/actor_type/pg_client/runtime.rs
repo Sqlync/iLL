@@ -777,7 +777,7 @@ actor alice = pg_client
 
 as db:
   run,
-    port: self.port
+    external_port: self.port
     env:
       POSTGRES_PASSWORD: \"pw\"
       POSTGRES_USER: \"postgres\"

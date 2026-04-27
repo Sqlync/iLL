@@ -15,7 +15,7 @@ actor alice = mqtt_client
 
 as broker:
   run,
-    port: self.port
+    external_port: self.port
 
 # tcp-level failure — wrong port, no CONNACK produced
 as alice:

@@ -10,7 +10,7 @@ actor alice = pg_client
 # start runs the db; it will auto-stop on test completion
 as db:
   run,
-    port: self.port
+    external_port: self.port
     env:
       POSTGRES_USER: "root"
       POSTGRES_PASSWORD: "root"
