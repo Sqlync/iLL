@@ -142,10 +142,13 @@ define_outcome! {
 
 define_outcome! {
     /// `error.mqtt.*` — broker-side rejections and client-side protocol
-    /// errors. `reason` is a per-command atom (see each command's docs);
-    /// `reason_code` is the raw MQTT v5 byte (e.g. 135 for `:not_authorized`,
-    /// 142 for session takeover) and is always populated when the broker
-    /// supplied one — `0` when the rejection was generated client-side.
+    /// errors. `reason` is a per-command atom (see each command's docs).
+    ///
+    /// `reason_code` is the raw MQTT v5 byte (e.g. 135 for
+    /// `:not_authorized`, 142 for session takeover). When the rejection is
+    /// generated client-side (no broker round-trip) the code is set to `-1`
+    /// — distinct from `0`, which is a valid v5 success code (UNSPECIFIED)
+    /// and could otherwise be confused with "the broker said OK."
     pub MqttError {
         reason: Atom,
         reason_code: Number,
@@ -392,11 +395,11 @@ publish_cmd!(Publish2, "publish_2", PUBLISH_2, PUBLISH_QOSN_ERROR_TYPES);
 
 // ── Receive: split into receive_publish / receive_disconnect ─────────────────
 //
-// Source syntax is `receive publish` / `receive disconnect`. The lowerer
-// rewrites these into `receive_publish` / `receive_disconnect` command names
-// before validation runs (see `lower::Lowerer::lower_command`), so the
-// validator and harness see a fully-named command and can statically
-// type-check the per-event `ok.*` fields.
+// Source syntax is `receive publish` / `receive disconnect`. The mqtt_client
+// actor type fuses the leading event ident into the command name at
+// resolution time (see `MqttClient::resolve_command`), so the validator and
+// harness see a fully-named command and can statically type-check the
+// per-event `ok.*` fields and mode transitions.
 
 pub struct ReceivePublish;
 impl Command for ReceivePublish {

@@ -176,10 +176,18 @@ async fn run_as_block(
                 // Validator should have caught an unknown command; be defensive.
                 let (cmd_def, consumed) = actor_type
                     .resolve_command(&cmd.name.name, &cmd.positional_args)
-                    .ok_or_else(|| StatementReport::EvalError {
-                        actor: actor_name.clone(),
-                        span: cmd.span,
-                        message: format!("unknown command `{}`", cmd.name.name),
+                    .ok_or_else(|| {
+                        let message =
+                            if let Some(Expr::Ident(event)) = cmd.positional_args.first() {
+                                format!("unknown command `{} {}`", cmd.name.name, event.name)
+                            } else {
+                                format!("unknown command `{}`", cmd.name.name)
+                            };
+                        StatementReport::EvalError {
+                            actor: actor_name.clone(),
+                            span: cmd.span,
+                            message,
+                        }
                     })?;
 
                 let args = eval_command_args(cmd, consumed, &scope).map_err(|e| {

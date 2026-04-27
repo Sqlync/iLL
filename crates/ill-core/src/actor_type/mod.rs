@@ -178,6 +178,12 @@ pub trait ActorType: Send + Sync + 'static {
     /// Actor types that have multi-token source forms (e.g. mqtt's
     /// `receive publish`) override this to fuse the leading event ident into
     /// the command name without a separate AST-rewrite pass.
+    ///
+    /// **Contract:** the returned `consumed` count must satisfy
+    /// `consumed <= positional.len()`. Validators and the harness slice
+    /// `positional[consumed..]`; an over-count panics. Override impls should
+    /// only consume positionals they have positively identified as part of
+    /// the source spelling.
     fn resolve_command(
         &self,
         name: &str,

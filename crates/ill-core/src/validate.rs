@@ -283,11 +283,7 @@ impl<'r> Validator<'r> {
             self.diagnostics.push(Diagnostic::error(
                 cmd.name.span,
                 DiagnosticCode::UnknownCommand,
-                format!(
-                    "unknown command `{}` for actor type `{}`",
-                    cmd.name.name,
-                    type_def.name()
-                ),
+                unknown_command_message(type_def.name(), &cmd.name.name, &cmd.positional_args),
             ));
             return (&[], &[], None);
         };
@@ -475,6 +471,21 @@ impl<'r> Validator<'r> {
             }
             _ => expr_type(expr),
         }
+    }
+}
+
+/// Format an "unknown command" diagnostic. When the source spelling has a
+/// leading bare-ident positional (e.g. `receive bogus`), name it explicitly
+/// — that's almost always the real source of the problem, not the bare
+/// command keyword.
+fn unknown_command_message(actor_type: &str, name: &str, positional: &[Expr]) -> String {
+    if let Some(Expr::Ident(event)) = positional.first() {
+        format!(
+            "unknown command `{} {}` for actor type `{}`",
+            name, event.name, actor_type
+        )
+    } else {
+        format!("unknown command `{name}` for actor type `{actor_type}`")
     }
 }
 

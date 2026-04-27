@@ -104,3 +104,23 @@ impl fmt::Display for Value {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_of_type_dict_matches_value_dict() {
+        let mut d = Dict::new();
+        d.insert("k".into(), Value::String("v".into()));
+        assert!(Value::Dict(d).is_of_type(ValueType::Dict));
+    }
+
+    #[test]
+    fn is_of_type_dict_does_not_match_other_values() {
+        assert!(!Value::String("x".into()).is_of_type(ValueType::Dict));
+        assert!(!Value::Number(1).is_of_type(ValueType::Dict));
+        assert!(!Value::Bytes(vec![0]).is_of_type(ValueType::Dict));
+        assert!(!Value::Null.is_of_type(ValueType::Dict));
+    }
+}
