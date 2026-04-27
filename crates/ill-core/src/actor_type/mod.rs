@@ -57,6 +57,10 @@ pub enum ValueType {
     Bool,
     Atom,
     Bytes,
+    /// A key→value map. Field shape is not statically declared, but the
+    /// type is — `Dict` participates in indexing assertions like
+    /// `ok.user_properties["env"]`.
+    Dict,
     /// A structured runtime value produced by parsing (json, protobuf, etc.).
     /// The shape is not statically known to the validator.
     Dynamic,

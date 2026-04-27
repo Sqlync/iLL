@@ -8,10 +8,11 @@ use crate::runtime::{Dict, Value};
 // ── Outcome shapes ────────────────────────────────────────────────────────────
 //
 // `Connect` / `receive_publish` / `receive_disconnect` carry MQTT v5 user
-// properties — a key→value map that has no first-class `ValueType`. Those
-// outcome structs are hand-written so the `user_properties` field can be a
-// `Dict` (declared as `Dynamic` in `OutcomeField`, the same way `pg_client`
-// declares its `row` and `col` fields). Pure-scalar shapes still go through
+// properties — a key→value map declared as `ValueType::Dict`, and an MQTT
+// payload declared as `ValueType::Bytes` (MQTT payloads are wire-bytes; the
+// assertion layer is responsible for any byte/string coercion at compare
+// time). These outcome structs are hand-written so non-scalar fields keep
+// their concrete Rust types; pure-scalar shapes still go through
 // `define_outcome!`.
 
 /// `connect` ok shape. `session_present` is the CONNACK flag;
@@ -36,7 +37,7 @@ impl ConnectOk {
         },
         OutcomeField {
             name: "user_properties",
-            ty: ValueType::Dynamic,
+            ty: ValueType::Dict,
         },
     ];
 
@@ -58,14 +59,11 @@ impl ConnectOk {
     }
 }
 
-/// `receive_publish` ok shape. `payload` is `Value` (rather than `String` or
-/// `Vec<u8>`) because MQTT publishes carry opaque bytes; the runtime decides
-/// whether to surface them as `Value::String` or `Value::Bytes` based on the
-/// payload format indicator. `qos` is the published QoS as observed by the
-/// subscriber.
+/// `receive_publish` ok shape. `payload` is the wire bytes of the publish;
+/// `qos` is the published QoS as observed by the subscriber.
 pub struct ReceivePublishOk {
     pub topic: String,
-    pub payload: Value,
+    pub payload: Vec<u8>,
     pub qos: i64,
     pub user_properties: Dict,
 }
@@ -78,7 +76,7 @@ impl ReceivePublishOk {
         },
         OutcomeField {
             name: "payload",
-            ty: ValueType::Unknown,
+            ty: ValueType::Bytes,
         },
         OutcomeField {
             name: "qos",
@@ -86,14 +84,14 @@ impl ReceivePublishOk {
         },
         OutcomeField {
             name: "user_properties",
-            ty: ValueType::Dynamic,
+            ty: ValueType::Dict,
         },
     ];
 
     pub fn into_dict(self) -> Dict {
         let mut m = Dict::new();
         m.insert("topic".into(), Value::String(self.topic));
-        m.insert("payload".into(), self.payload);
+        m.insert("payload".into(), Value::Bytes(self.payload));
         m.insert("qos".into(), Value::Number(self.qos));
         m.insert(
             "user_properties".into(),
@@ -118,7 +116,7 @@ impl ReceiveDisconnectOk {
         },
         OutcomeField {
             name: "user_properties",
-            ty: ValueType::Dynamic,
+            ty: ValueType::Dict,
         },
     ];
 
