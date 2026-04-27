@@ -277,7 +277,9 @@ impl<'r> Validator<'r> {
         let type_def = state.type_def;
         let current_mode = state.mode;
 
-        let Some(cmd_def) = type_def.command(&cmd.name.name) else {
+        let Some((cmd_def, consumed)) =
+            type_def.resolve_command(&cmd.name.name, &cmd.positional_args)
+        else {
             self.diagnostics.push(Diagnostic::error(
                 cmd.name.span,
                 DiagnosticCode::UnknownCommand,
@@ -310,9 +312,13 @@ impl<'r> Validator<'r> {
             return (&[], &[], None);
         }
 
-        // Required positional args (presence only for now).
+        // Required positional args (presence only for now). The first
+        // `consumed` source positionals were absorbed by command-name
+        // resolution (e.g. mqtt's `receive publish`); the schema only
+        // describes the remaining args.
+        let source_positional = &cmd.positional_args[consumed..];
         let expected_positional = cmd_def.positional().len();
-        let actual_positional = cmd.positional_args.len();
+        let actual_positional = source_positional.len();
         if actual_positional < expected_positional {
             let missing = cmd_def.positional()[actual_positional].name;
             self.diagnostics.push(Diagnostic::error(
@@ -324,7 +330,7 @@ impl<'r> Validator<'r> {
                 ),
             ));
         }
-        for arg in &cmd.positional_args {
+        for arg in source_positional {
             self.check_squiggles_in_expr(arg);
         }
 

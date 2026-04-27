@@ -173,19 +173,20 @@ async fn run_as_block(
                 scope.unbind("ok");
                 scope.unbind("error");
 
-                let args =
-                    eval_command_args(cmd, &scope).map_err(|e| StatementReport::EvalError {
-                        actor: actor_name.clone(),
-                        span: cmd.span,
-                        message: e.to_string(),
-                    })?;
-
                 // Validator should have caught an unknown command; be defensive.
-                let cmd_def = actor_type.command(&cmd.name.name).ok_or_else(|| {
-                    StatementReport::EvalError {
+                let (cmd_def, consumed) = actor_type
+                    .resolve_command(&cmd.name.name, &cmd.positional_args)
+                    .ok_or_else(|| StatementReport::EvalError {
                         actor: actor_name.clone(),
                         span: cmd.span,
                         message: format!("unknown command `{}`", cmd.name.name),
+                    })?;
+
+                let args = eval_command_args(cmd, consumed, &scope).map_err(|e| {
+                    StatementReport::EvalError {
+                        actor: actor_name.clone(),
+                        span: cmd.span,
+                        message: e.to_string(),
                     }
                 })?;
 
@@ -283,9 +284,18 @@ fn run_let(let_stmt: &Let, scope: &mut Scope) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn eval_command_args(cmd: &CommandAst, scope: &Scope) -> Result<CommandArgs, RuntimeError> {
-    let mut positional = Vec::with_capacity(cmd.positional_args.len());
-    for expr in &cmd.positional_args {
+/// Evaluate a command's positional + keyword args. The first `consumed`
+/// positionals were absorbed by command-name resolution (see
+/// `ActorType::resolve_command`) and don't reach the runtime — so they're
+/// skipped here rather than evaluated as value expressions.
+fn eval_command_args(
+    cmd: &CommandAst,
+    consumed: usize,
+    scope: &Scope,
+) -> Result<CommandArgs, RuntimeError> {
+    let source_positional = &cmd.positional_args[consumed..];
+    let mut positional = Vec::with_capacity(source_positional.len());
+    for expr in source_positional {
         positional.push(eval(expr, scope)?);
     }
     let keyword = eval_keyword_args(&cmd.keyword_args, scope)?;

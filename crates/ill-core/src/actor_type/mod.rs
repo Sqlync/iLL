@@ -13,6 +13,7 @@
 
 use std::any::Any;
 
+use crate::ast::Expr;
 use crate::runtime::{CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome};
 
 pub mod args_actor;
@@ -165,6 +166,24 @@ pub trait ActorType: Send + Sync + 'static {
 
     fn command(&self, name: &str) -> Option<&'static dyn Command> {
         self.commands().iter().copied().find(|c| c.name() == name)
+    }
+
+    /// Resolve a source-form command spelling to a concrete `Command`.
+    ///
+    /// Returns the resolved command and how many leading positional args the
+    /// resolution consumed (those are part of the source spelling, not the
+    /// command's argument list — the validator and harness skip them).
+    ///
+    /// Default behaviour: a plain name lookup with zero positionals consumed.
+    /// Actor types that have multi-token source forms (e.g. mqtt's
+    /// `receive publish`) override this to fuse the leading event ident into
+    /// the command name without a separate AST-rewrite pass.
+    fn resolve_command(
+        &self,
+        name: &str,
+        _positional: &[Expr],
+    ) -> Option<(&'static dyn Command, usize)> {
+        self.command(name).map(|c| (c, 0))
     }
 
     fn mode(&self, name: &str) -> Option<&'static dyn Mode> {
