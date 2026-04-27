@@ -25,14 +25,15 @@ use crate::runtime::{
 };
 
 /// Reason atoms surfaced on `error.container.reason`. Run: `:timeout`,
-/// `:already_running`, `:docker_unavailable`, `:bad_env`, `:bad_port`.
-/// Stop: `:not_running`, `:timeout`, `:docker_unavailable`.
+/// `:already_running`, `:docker_unavailable`, `:bad_env`, `:bad_port`,
+/// `:port_in_use`. Stop: `:not_running`, `:timeout`, `:docker_unavailable`.
 const REASON_TIMEOUT: &str = "timeout";
 const REASON_ALREADY_RUNNING: &str = "already_running";
 const REASON_NOT_RUNNING: &str = "not_running";
 const REASON_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
 const REASON_BAD_ENV: &str = "bad_env";
 const REASON_BAD_PORT: &str = "bad_port";
+const REASON_PORT_IN_USE: &str = "port_in_use";
 
 /// Label every container we create so a future startup sweep (not yet
 /// implemented — see ROADMAP "Docker optimizations → zombies") can find and
@@ -58,13 +59,27 @@ fn run_error(reason: &str) -> RunOutcome {
 }
 
 /// Map a testcontainers runtime error (from `start()` or `rm()`) to one of
-/// our atom reasons. The `StartupTimeout` variant is the only one we can
-/// identify structurally; everything else collapses to `:docker_unavailable`.
+/// our atom reasons. `StartupTimeout` is structural; port-bind failures
+/// surface only through Docker's error stream, so we string-match the
+/// rendered error chain. Anything we don't recognize collapses to
+/// `:docker_unavailable`.
 fn classify_run_error(e: &TestcontainersError) -> &'static str {
-    match e {
-        TestcontainersError::WaitContainer(WaitContainerError::StartupTimeout) => REASON_TIMEOUT,
-        _ => REASON_DOCKER_UNAVAILABLE,
+    if matches!(
+        e,
+        TestcontainersError::WaitContainer(WaitContainerError::StartupTimeout)
+    ) {
+        return REASON_TIMEOUT;
     }
+    // Docker's port-bind failure messages: "port is already allocated",
+    // "address already in use", "bind: address already in use". We accept
+    // any of them via lowercase substring match on the full error chain.
+    let rendered = format!("{e:#}").to_lowercase();
+    if rendered.contains("port is already allocated")
+        || rendered.contains("address already in use")
+    {
+        return REASON_PORT_IN_USE;
+    }
+    REASON_DOCKER_UNAVAILABLE
 }
 
 pub struct ContainerInstance {
@@ -273,6 +288,13 @@ impl Stopped {
             Some(Some(p)) => Some(p), // supplied and valid
             Some(None) => return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT)),
         };
+        // `external_port:` without a declaration-level `internal_port:` is
+        // meaningless — the user asked us to publish on a host port but
+        // didn't say which container port to map from. Surface the same
+        // `:bad_port` atom rather than silently starting with no mapping.
+        if external_port.is_some() && internal_port.is_none() {
+            return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT));
+        }
         let mut req: ContainerRequest<GenericImage> = GenericImage::new(image_name, image_tag).into();
         if let (Some(host), Some(container)) = (external_port, internal_port) {
             req = req.with_mapped_port(host, container.tcp());
@@ -674,6 +696,31 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires docker"]
+    async fn external_port_without_internal_port_returns_bad_port() {
+        // `external_port:` on `run` is meaningless without a declaration-
+        // level `internal_port:` — the runtime should reject rather than
+        // silently start with no port mapping.
+        let mut inst = ContainerInstance::construct(&image_args("alpine:3.19"))
+            .await
+            .ok()
+            .expect("construct failed");
+        let mut kw = Dict::new();
+        kw.insert("external_port".into(), Value::Number(8080));
+        let outcome = inst
+            .execute(
+                "run",
+                &CommandArgs {
+                    positional: Vec::new(),
+                    keyword: kw,
+                },
+            )
+            .await;
+        assert_container_reason(&outcome, "bad_port");
+        assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
     async fn dockerfile_build_construct_run_teardown() {
         // Write a trivial Dockerfile to a tempdir and build it.
         use std::io::Write;
@@ -751,5 +798,72 @@ mod tests {
             ..Default::default()
         };
         let _msg = expect_construct_err(ContainerInstance::construct(&args).await);
+    }
+
+    #[tokio::test]
+    async fn internal_port_out_of_range_rejected_at_construct() {
+        // No docker needed — `internal_port` validation runs before any image
+        // I/O. Out-of-u16-range should produce a Construct error with a
+        // clear message, not silently truncate.
+        let mut kw = Dict::new();
+        kw.insert("image".into(), Value::String("alpine:3.19".into()));
+        kw.insert("internal_port".into(), Value::Number(70_000));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+            ..Default::default()
+        };
+        let msg = expect_construct_err(ContainerInstance::construct(&args).await);
+        assert!(
+            msg.contains("internal_port") && msg.contains("u16"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_port_wrong_type_rejected_at_construct() {
+        // A string where a number is required should surface as TypeMismatch,
+        // not Construct, matching how `image` and `dockerfile` are handled.
+        let mut kw = Dict::new();
+        kw.insert("image".into(), Value::String("alpine:3.19".into()));
+        kw.insert("internal_port".into(), Value::String("nope".into()));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+            ..Default::default()
+        };
+        match ContainerInstance::construct(&args).await {
+            Err(RuntimeError::TypeMismatch {
+                expected,
+                got,
+                context,
+            }) => {
+                assert_eq!(expected, "number");
+                assert_eq!(got, "string");
+                assert!(
+                    context.contains("internal_port"),
+                    "unexpected context: {context}"
+                );
+            }
+            Ok(_) => panic!("expected TypeMismatch, got Ok"),
+            Err(_) => panic!("expected TypeMismatch, got different RuntimeError"),
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_port_negative_rejected_at_construct() {
+        let mut kw = Dict::new();
+        kw.insert("image".into(), Value::String("alpine:3.19".into()));
+        kw.insert("internal_port".into(), Value::Number(-1));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+            ..Default::default()
+        };
+        let msg = expect_construct_err(ContainerInstance::construct(&args).await);
+        assert!(
+            msg.contains("internal_port") && msg.contains("u16"),
+            "unexpected message: {msg}"
+        );
     }
 }

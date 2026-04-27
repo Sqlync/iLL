@@ -16,10 +16,8 @@ pub struct Members {
 }
 
 /// Returned by `Members::set` when the caller tries to assign to a name
-/// that wasn't declared on the actor. The container's port-backfill path
-/// ignores this (it uses `set` as a no-op when the var isn't declared);
-/// future user-driven writes via `self.<name> = ...` will surface it as
-/// a runtime error.
+/// that wasn't declared on the actor. Future user-driven writes via
+/// `self.<name> = ...` will surface this as a runtime error.
 #[derive(Debug, PartialEq)]
 pub struct Undeclared;
 
