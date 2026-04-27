@@ -13,7 +13,8 @@ actor broker = container,
 actor alice = mqtt_client
 
 as broker:
-  run
+  run,
+    port: self.port
 
 # tcp-level failure — wrong port, no CONNACK produced
 as alice:

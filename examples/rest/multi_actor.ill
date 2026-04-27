@@ -2,13 +2,14 @@ actor api = container,
   dockerfile: "./api.Dockerfile"
   vars:
     @access read
+    port: 8080
     base: "http://localhost:8080"
 actor alice = http_client
 actor bob = http_client
 
 as api:
   run,
-    port: 8080
+    port: self.port
 
 as alice:
   post "${api.base}/auth/login",

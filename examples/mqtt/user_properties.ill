@@ -9,7 +9,8 @@ actor publisher = mqtt_client
 actor subscriber = mqtt_client
 
 as broker:
-  run
+  run,
+    port: self.port
 
 as subscriber:
   connect,

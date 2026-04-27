@@ -23,7 +23,8 @@ actor alice = mqtt_client
 
 # step 1: start the broker
 as broker:
-  run
+  run,
+    port: self.port
 
 # step 2: alice connects to broker
 as alice:

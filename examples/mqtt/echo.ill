@@ -8,7 +8,8 @@ actor sender = mqtt_client
 actor echo_server = mqtt_client
 
 as broker:
-  run
+  run,
+    port: self.port
 
 as echo_server:
   connect,
