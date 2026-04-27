@@ -51,7 +51,14 @@ const TEARDOWN_GRACE: Duration = Duration::from_secs(2);
 
 pub struct ExecInstance {
     target: String,
+    /// Directory of the `.ill` file. Used to anchor relative `command`
+    /// program lookups (e.g. `./script.sh` next to the test) so that the
+    /// program-resolution semantics don't drift when `cwd` is overridden.
     source_dir: PathBuf,
+    /// Working directory the child process is spawned in. Equals `source_dir`
+    /// unless the user supplied `cwd:`, in which case it is the resolved
+    /// absolute path of that override.
+    working_dir: PathBuf,
     mode: ExecMode,
 }
 
@@ -91,12 +98,51 @@ impl ExecInstance {
             None => return Err(RuntimeError::MissingKwarg { name: "command" }),
         };
 
+        let working_dir = match args.kw("cwd") {
+            None => args.source_dir.clone(),
+            Some(Value::String(s)) => resolve_cwd(s, &args.source_dir)?,
+            Some(other) => {
+                return Err(RuntimeError::TypeMismatch {
+                    expected: "string",
+                    got: other.type_name(),
+                    context: "exec `cwd`".into(),
+                });
+            }
+        };
+
         Ok(Self {
             target,
             source_dir: args.source_dir.clone(),
+            working_dir,
             mode: ExecMode::Stopped(Stopped),
         })
     }
+}
+
+/// Resolve a user-supplied `cwd` against the `.ill` file's directory and
+/// fail-fast if it doesn't point at a directory. Catching this at construct
+/// time turns a confusing spawn-time `NotFound` (which would surface as
+/// `:command_not_found`, masking the real problem) into a clear
+/// `ConstructFailure` in the test report.
+fn resolve_cwd(cwd: &str, source_dir: &Path) -> Result<PathBuf, RuntimeError> {
+    if cwd.is_empty() {
+        return Err(RuntimeError::Construct(
+            "exec `cwd` must not be empty".to_string(),
+        ));
+    }
+    let candidate = Path::new(cwd);
+    let resolved = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        source_dir.join(candidate)
+    };
+    if !resolved.is_dir() {
+        return Err(RuntimeError::Construct(format!(
+            "exec `cwd` does not exist or is not a directory: {}",
+            resolved.display()
+        )));
+    }
+    Ok(resolved)
 }
 
 impl Stopped {
@@ -104,11 +150,15 @@ impl Stopped {
         self,
         target: &str,
         source_dir: &Path,
+        working_dir: &Path,
         cmd: &'static str,
         args: &CommandArgs,
     ) -> (ExecMode, RunOutcome) {
         match cmd {
-            "run" => self.run(target, source_dir, args.kw("env")).await,
+            "run" => {
+                self.run(target, source_dir, working_dir, args.kw("env"))
+                    .await
+            }
             other => (
                 ExecMode::Stopped(self),
                 RunOutcome::NotImplemented {
@@ -121,10 +171,16 @@ impl Stopped {
 
     /// Spawn the configured target. On success, transitions to `Running`;
     /// on any pre-spawn or spawn error, stays in `Stopped`.
+    ///
+    /// `source_dir` and `working_dir` differ when the user supplied `cwd:`.
+    /// Program lookup uses `source_dir` (so `./script.sh` always means
+    /// "next to the .ill file"), while the spawned child runs in
+    /// `working_dir` (the user's chosen target directory).
     async fn run(
         self,
         target: &str,
         source_dir: &Path,
+        working_dir: &Path,
         env: Option<&Value>,
     ) -> (ExecMode, RunOutcome) {
         let parts = match shlex::split(target) {
@@ -138,7 +194,7 @@ impl Stopped {
         let resolved = resolve_program(program, source_dir);
 
         let mut cmd = TokioCommand::new(&resolved);
-        cmd.args(rest).current_dir(source_dir).kill_on_drop(true);
+        cmd.args(rest).current_dir(working_dir).kill_on_drop(true);
 
         if let Some(env_val) = env {
             if apply_env(&mut cmd, env_val).is_err() {
@@ -224,7 +280,16 @@ impl ActorInstance for ExecInstance {
 
     async fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
         let (next, outcome) = match std::mem::take(&mut self.mode) {
-            ExecMode::Stopped(s) => s.execute(&self.target, &self.source_dir, cmd, args).await,
+            ExecMode::Stopped(s) => {
+                s.execute(
+                    &self.target,
+                    &self.source_dir,
+                    &self.working_dir,
+                    cmd,
+                    args,
+                )
+                .await
+            }
             ExecMode::Running(r) => r.execute(cmd, args).await,
         };
         self.mode = next;
@@ -513,6 +578,194 @@ mod tests {
         // Second teardown is still a no-op.
         let td = inst.teardown().await;
         assert!(td.ok);
+    }
+
+    /// Helper: build a fresh, unique tempdir for tests that need a real
+    /// directory on disk (cwd resolution, marker-file checks). Caller is
+    /// responsible for `remove_dir_all` cleanup.
+    fn unique_tempdir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ill-exec-test-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Build `ConstructArgs` with a `command` and an explicit `source_dir`,
+    /// optionally pinning a `cwd` kwarg. Mirrors the existing `construct_args`
+    /// helper but parameterised for cwd-resolution tests.
+    fn construct_args_with(
+        target: &str,
+        source_dir: PathBuf,
+        cwd: Option<&str>,
+    ) -> ConstructArgs {
+        let mut kw = Dict::new();
+        kw.insert("command".into(), Value::String(target.into()));
+        if let Some(c) = cwd {
+            kw.insert("cwd".into(), Value::String(c.into()));
+        }
+        ConstructArgs {
+            keyword: kw,
+            source_dir,
+            ..Default::default()
+        }
+    }
+
+    /// Poll for a file to appear, up to ~2s. Used to confirm a spawned child
+    /// ran in the expected working directory by having it `touch` a marker.
+    async fn wait_for_file(path: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("marker file {} did not appear", path.display());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn cwd_relative_resolves_against_source_dir() {
+        // Layout: <root>/source/, <root>/source/sub/. cwd: "sub" must land
+        // the child in <root>/source/sub.
+        let root = unique_tempdir("cwd-rel");
+        let source_dir = root.join("source");
+        let subdir = source_dir.join("sub");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let args = construct_args_with(
+            "sh -c 'touch ran && sleep 60'",
+            source_dir.clone(),
+            Some("sub"),
+        );
+        let mut inst = ExecInstance::construct(&args).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        assert!(matches!(outcome, RunOutcome::Ok(_)));
+
+        wait_for_file(&subdir.join("ran")).await;
+        assert!(
+            !source_dir.join("ran").exists(),
+            "marker file should not appear in source_dir when cwd is set"
+        );
+
+        let _ = inst.teardown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn cwd_absolute_used_as_is() {
+        // Source dir and cwd target are siblings; cwd is absolute.
+        let root = unique_tempdir("cwd-abs");
+        let source_dir = root.join("source");
+        let target_dir = root.join("elsewhere");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let args = construct_args_with(
+            "sh -c 'touch ran && sleep 60'",
+            source_dir.clone(),
+            Some(target_dir.to_str().unwrap()),
+        );
+        let mut inst = ExecInstance::construct(&args).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        assert!(matches!(outcome, RunOutcome::Ok(_)));
+
+        wait_for_file(&target_dir.join("ran")).await;
+        assert!(!source_dir.join("ran").exists());
+
+        let _ = inst.teardown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn cwd_absent_uses_source_dir() {
+        // Default behaviour: with no cwd kwarg, child runs in source_dir.
+        let source_dir = unique_tempdir("cwd-default");
+        let args = construct_args_with("sh -c 'touch ran && sleep 60'", source_dir.clone(), None);
+        let mut inst = ExecInstance::construct(&args).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        assert!(matches!(outcome, RunOutcome::Ok(_)));
+
+        wait_for_file(&source_dir.join("ran")).await;
+
+        let _ = inst.teardown().await;
+        let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    /// Run `ExecInstance::construct(args)` and return the error, panicking
+    /// if it unexpectedly succeeded. We can't use `Result::unwrap_err`
+    /// because `ExecInstance` doesn't implement `Debug`.
+    fn expect_construct_err(args: &ConstructArgs) -> RuntimeError {
+        match ExecInstance::construct(args) {
+            Ok(_) => panic!("expected construct error, got Ok"),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn cwd_nonexistent_fails_construct() {
+        let source_dir = unique_tempdir("cwd-missing");
+        let args = construct_args_with("true", source_dir.clone(), Some("does_not_exist"));
+        let err = expect_construct_err(&args);
+        assert!(
+            matches!(&err, RuntimeError::Construct(m) if m.contains("does not exist")),
+            "expected Construct error mentioning 'does not exist', got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    #[test]
+    fn cwd_pointing_at_file_fails_construct() {
+        let source_dir = unique_tempdir("cwd-isfile");
+        let file_path = source_dir.join("not_a_dir");
+        std::fs::write(&file_path, b"").unwrap();
+
+        let args = construct_args_with("true", source_dir.clone(), Some("not_a_dir"));
+        let err = expect_construct_err(&args);
+        assert!(
+            matches!(&err, RuntimeError::Construct(m) if m.contains("not a directory")),
+            "expected Construct error mentioning 'not a directory', got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    #[test]
+    fn cwd_empty_string_fails_construct() {
+        let source_dir = unique_tempdir("cwd-empty");
+        let args = construct_args_with("true", source_dir.clone(), Some(""));
+        let err = expect_construct_err(&args);
+        assert!(
+            matches!(&err, RuntimeError::Construct(m) if m.contains("must not be empty")),
+            "expected Construct error about empty cwd, got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    #[test]
+    fn cwd_wrong_type_fails_construct() {
+        let source_dir = unique_tempdir("cwd-badtype");
+        let mut kw = Dict::new();
+        kw.insert("command".into(), Value::String("true".into()));
+        kw.insert("cwd".into(), Value::Number(42));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: source_dir.clone(),
+            ..Default::default()
+        };
+        let err = expect_construct_err(&args);
+        assert!(
+            matches!(&err, RuntimeError::TypeMismatch { context, .. } if context.contains("cwd")),
+            "expected TypeMismatch on cwd, got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&source_dir);
     }
 
     #[tokio::test]
