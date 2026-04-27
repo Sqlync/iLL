@@ -54,8 +54,8 @@ impl Value {
 
     /// True if this value is a valid inhabitant of `ty`. `Dynamic` and
     /// `Unknown` are permissive (they match any runtime value); every other
-    /// variant is strict. `Array`/`Dict`/`Null` match no concrete
-    /// `ValueType` — use `Dynamic` to accept them.
+    /// variant is strict. `Array`/`Null` match no concrete `ValueType` — use
+    /// `Dynamic` to accept them.
     pub fn is_of_type(&self, ty: ValueType) -> bool {
         matches!(
             (ty, self),
@@ -66,6 +66,7 @@ impl Value {
                 | (ValueType::Bool, Value::Bool(_))
                 | (ValueType::Atom, Value::Atom(_))
                 | (ValueType::Bytes, Value::Bytes(_))
+                | (ValueType::Dict, Value::Dict(_))
         )
     }
 }
@@ -101,5 +102,25 @@ impl fmt::Display for Value {
             }
             Value::Null => write!(f, "null"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_of_type_dict_matches_value_dict() {
+        let mut d = Dict::new();
+        d.insert("k".into(), Value::String("v".into()));
+        assert!(Value::Dict(d).is_of_type(ValueType::Dict));
+    }
+
+    #[test]
+    fn is_of_type_dict_does_not_match_other_values() {
+        assert!(!Value::String("x".into()).is_of_type(ValueType::Dict));
+        assert!(!Value::Number(1).is_of_type(ValueType::Dict));
+        assert!(!Value::Bytes(vec![0]).is_of_type(ValueType::Dict));
+        assert!(!Value::Null.is_of_type(ValueType::Dict));
     }
 }

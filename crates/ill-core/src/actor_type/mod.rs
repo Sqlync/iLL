@@ -13,6 +13,7 @@
 
 use std::any::Any;
 
+use crate::ast::Expr;
 use crate::runtime::{CommandArgs, ConstructArgs, Dict, RunOutcome, RuntimeError, TeardownOutcome};
 
 pub mod args_actor;
@@ -57,6 +58,10 @@ pub enum ValueType {
     Bool,
     Atom,
     Bytes,
+    /// A key→value map. Field shape is not statically declared, but the
+    /// type is — `Dict` participates in indexing assertions like
+    /// `ok.user_properties["env"]`.
+    Dict,
     /// A structured runtime value produced by parsing (json, protobuf, etc.).
     /// The shape is not statically known to the validator.
     Dynamic,
@@ -163,6 +168,30 @@ pub trait ActorType: Send + Sync + 'static {
         self.commands().iter().copied().find(|c| c.name() == name)
     }
 
+    /// Resolve a source-form command spelling to a concrete `Command`.
+    ///
+    /// Returns the resolved command and how many leading positional args the
+    /// resolution consumed (those are part of the source spelling, not the
+    /// command's argument list — the validator and harness skip them).
+    ///
+    /// Default behaviour: a plain name lookup with zero positionals consumed.
+    /// Actor types that have multi-token source forms (e.g. mqtt's
+    /// `receive publish`) override this to fuse the leading event ident into
+    /// the command name without a separate AST-rewrite pass.
+    ///
+    /// **Contract:** the returned `consumed` count must satisfy
+    /// `consumed <= positional.len()`. Validators and the harness slice
+    /// `positional[consumed..]`; an over-count panics. Override impls should
+    /// only consume positionals they have positively identified as part of
+    /// the source spelling.
+    fn resolve_command(
+        &self,
+        name: &str,
+        _positional: &[Expr],
+    ) -> Option<(&'static dyn Command, usize)> {
+        self.command(name).map(|c| (c, 0))
+    }
+
     fn mode(&self, name: &str) -> Option<&'static dyn Mode> {
         self.modes().iter().copied().find(|m| m.name() == name)
     }
@@ -179,6 +208,22 @@ pub trait ActorType: Send + Sync + 'static {
         _args: &ConstructArgs,
     ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
         Err(RuntimeError::ActorNotImplemented(self.name()))
+    }
+}
+
+/// Format an "unknown command" diagnostic. When the source spelling has a
+/// leading bare-ident positional (e.g. mqtt's `receive bogus`), name it
+/// explicitly — that's almost always the real source of the problem, not
+/// the bare command keyword. Shared by the validator and the harness so
+/// both layers report the same message.
+pub fn unknown_command_message(actor_type: &str, name: &str, positional: &[Expr]) -> String {
+    if let Some(Expr::Ident(event)) = positional.first() {
+        format!(
+            "unknown command `{name} {}` for actor type `{actor_type}`",
+            event.name
+        )
+    } else {
+        format!("unknown command `{name}` for actor type `{actor_type}`")
     }
 }
 
