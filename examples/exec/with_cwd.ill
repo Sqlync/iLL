@@ -18,7 +18,7 @@
 
 actor app = exec,
   command: "python3 -m http.server 8080"
-  cwd: "../basic"
+  cwd: "../container"
 
 as app:
   run
