@@ -7,13 +7,15 @@
 
 actor broker = container,
   image: "eclipse-mosquitto"
+  internal_port: 1883
   vars:
     @access read
     port: 1883
 actor alice = mqtt_client
 
 as broker:
-  run
+  run,
+    external_port: self.port
 
 # tcp-level failure — wrong port, no CONNACK produced
 as alice:

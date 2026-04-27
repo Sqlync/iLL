@@ -5,6 +5,7 @@
 
 actor broker = container,
   image: "eclipse-mosquitto"
+  internal_port: 1883
   vars:
     @access read
     port: 1883
@@ -12,7 +13,8 @@ actor client1 = mqtt_client
 actor client2 = mqtt_client
 
 as broker:
-  run
+  run,
+    external_port: self.port
 
 as client1:
   connect,

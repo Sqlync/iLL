@@ -33,9 +33,15 @@ impl ActorType for Container {
     }
 
     fn constructor_keyword(&self) -> &'static [KeywordArgDef] {
-        // The metadata says both are optional individually; the "exactly
-        // one" check lives in `ContainerInstance::construct` because it's
-        // a cross-kwarg invariant the current validator can't express.
+        // `image` and `dockerfile` are individually optional but exactly
+        // one is required; that cross-kwarg invariant is enforced in
+        // `ContainerInstance::construct`.
+        //
+        // `internal_port` names the port the process inside the container
+        // listens on (image fact). It pairs with the per-invocation
+        // `external_port:` kwarg on `run` to drive the host→container
+        // mapping. Optional — containers that don't expose anything (e.g.
+        // a one-shot CMD that exits) leave it unset.
         &[
             KeywordArgDef {
                 name: "image",
@@ -45,6 +51,11 @@ impl ActorType for Container {
             KeywordArgDef {
                 name: "dockerfile",
                 ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
+                name: "internal_port",
+                ty: ValueType::Number,
                 required: false,
             },
         ]

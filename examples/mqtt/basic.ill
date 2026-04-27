@@ -16,6 +16,7 @@
 # define the actors
 actor broker = container,
   image: "eclipse-mosquitto"
+  internal_port: 1883
   vars:
     @access read
     port: 1883
@@ -23,7 +24,8 @@ actor alice = mqtt_client
 
 # step 1: start the broker
 as broker:
-  run
+  run,
+    external_port: self.port
 
 # step 2: alice connects to broker
 as alice:

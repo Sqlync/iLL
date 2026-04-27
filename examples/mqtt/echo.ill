@@ -1,6 +1,7 @@
 # define the actors
 actor broker = container,
   image: "eclipse-mosquitto"
+  internal_port: 1883
   vars:
     @access read
     port: 1883
@@ -8,7 +9,8 @@ actor sender = mqtt_client
 actor echo_server = mqtt_client
 
 as broker:
-  run
+  run,
+    external_port: self.port
 
 as echo_server:
   connect,

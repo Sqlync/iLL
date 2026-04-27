@@ -4,14 +4,14 @@
 
 actor nginx = container,
   image: "nginx:latest"
+  internal_port: 80
   vars:
-    @access read
     port: 8080
 
 # run starts the container; it will auto-stop when the test ends
 # env vars are passed directly to the container process
 as nginx:
   run,
-    port: 8080
+    external_port: self.port
     env:
       NGINX_HOST: "localhost"

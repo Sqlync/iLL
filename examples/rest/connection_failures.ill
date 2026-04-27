@@ -10,14 +10,16 @@
 
 actor api = container,
   dockerfile: "./api.Dockerfile"
+  internal_port: 8080
   vars:
     @access read
+    port: 8080
     base: "http://localhost:8080"
 actor alice = http_client
 
 as api:
   run,
-    port: 8080
+    external_port: self.port
 
 as alice:
   # 5xx — server answered with an error

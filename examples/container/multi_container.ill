@@ -7,23 +7,25 @@
 
 actor backend = container,
   image: "my-backend:latest"
+  internal_port: 8080
   vars:
     @access read
     port: 8080
 
 actor frontend = container,
   image: "my-frontend:latest"
+  internal_port: 3000
   vars:
     @access read
     port: 3000
 
 as backend:
   run,
-    port: self.port
+    external_port: self.port
 
 as frontend:
   run,
-    port: self.port
+    external_port: self.port
     env:
       # read backend.port from the backend actor's member variable
       BACKEND_URL: "http://localhost:${backend.port}"

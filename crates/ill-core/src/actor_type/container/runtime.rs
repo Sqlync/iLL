@@ -25,14 +25,15 @@ use crate::runtime::{
 };
 
 /// Reason atoms surfaced on `error.container.reason`. Run: `:timeout`,
-/// `:already_running`, `:docker_unavailable`, `:bad_env`, `:bad_port`.
-/// Stop: `:not_running`, `:timeout`, `:docker_unavailable`.
+/// `:already_running`, `:docker_unavailable`, `:bad_env`, `:bad_port`,
+/// `:port_in_use`. Stop: `:not_running`, `:timeout`, `:docker_unavailable`.
 const REASON_TIMEOUT: &str = "timeout";
 const REASON_ALREADY_RUNNING: &str = "already_running";
 const REASON_NOT_RUNNING: &str = "not_running";
 const REASON_DOCKER_UNAVAILABLE: &str = "docker_unavailable";
 const REASON_BAD_ENV: &str = "bad_env";
 const REASON_BAD_PORT: &str = "bad_port";
+const REASON_PORT_IN_USE: &str = "port_in_use";
 
 /// Label every container we create so a future startup sweep (not yet
 /// implemented — see ROADMAP "Docker optimizations → zombies") can find and
@@ -58,18 +59,33 @@ fn run_error(reason: &str) -> RunOutcome {
 }
 
 /// Map a testcontainers runtime error (from `start()` or `rm()`) to one of
-/// our atom reasons. The `StartupTimeout` variant is the only one we can
-/// identify structurally; everything else collapses to `:docker_unavailable`.
+/// our atom reasons. `StartupTimeout` is structural; port-bind failures
+/// surface only through Docker's error stream, so we string-match the
+/// rendered message. Unrecognized errors collapse to `:docker_unavailable`.
 fn classify_run_error(e: &TestcontainersError) -> &'static str {
-    match e {
-        TestcontainersError::WaitContainer(WaitContainerError::StartupTimeout) => REASON_TIMEOUT,
-        _ => REASON_DOCKER_UNAVAILABLE,
+    if matches!(
+        e,
+        TestcontainersError::WaitContainer(WaitContainerError::StartupTimeout)
+    ) {
+        return REASON_TIMEOUT;
     }
+    let rendered = e.to_string();
+    if rendered.contains("port is already allocated")
+        || rendered.contains("address already in use")
+    {
+        return REASON_PORT_IN_USE;
+    }
+    REASON_DOCKER_UNAVAILABLE
 }
 
 pub struct ContainerInstance {
     image_name: String,
     image_tag: String,
+    /// Port the process inside the container listens on. Image fact, set
+    /// at construct from the `internal_port:` kwarg, paired with the
+    /// per-invocation `external_port:` to drive `with_mapped_port`. `None`
+    /// when the actor never publishes a port.
+    internal_port: Option<u16>,
     mode: ContainerMode,
     members: Members,
 }
@@ -102,6 +118,24 @@ impl ContainerInstance {
     pub async fn construct(args: &ConstructArgs) -> Result<Self, RuntimeError> {
         let image_kw = args.kw("image");
         let dockerfile_kw = args.kw("dockerfile");
+        let internal_port = match args.kw("internal_port") {
+            None => None,
+            Some(Value::Number(n)) => match u16::try_from(*n) {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    return Err(RuntimeError::Construct(format!(
+                        "container `internal_port` {n} is out of range for a u16"
+                    )))
+                }
+            },
+            Some(other) => {
+                return Err(RuntimeError::TypeMismatch {
+                    expected: "number",
+                    got: other.type_name(),
+                    context: "container `internal_port`".into(),
+                })
+            }
+        };
         let members = Members::from_declarations(&args.vars);
 
         match (image_kw, dockerfile_kw) {
@@ -113,7 +147,9 @@ impl ContainerInstance {
             )),
 
             (Some(value), None) => match value {
-                Value::String(image_ref) => prepare_from_image(image_ref, members).await,
+                Value::String(image_ref) => {
+                    prepare_from_image(image_ref, internal_port, members).await
+                }
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
                     got: other.type_name(),
@@ -123,7 +159,8 @@ impl ContainerInstance {
 
             (None, Some(value)) => match value {
                 Value::String(path_ref) => {
-                    prepare_from_dockerfile(path_ref, &args.source_dir, members).await
+                    prepare_from_dockerfile(path_ref, &args.source_dir, internal_port, members)
+                        .await
                 }
                 other => Err(RuntimeError::TypeMismatch {
                     expected: "string",
@@ -137,6 +174,7 @@ impl ContainerInstance {
 
 async fn prepare_from_image(
     image_ref: &str,
+    internal_port: Option<u16>,
     members: Members,
 ) -> Result<ContainerInstance, RuntimeError> {
     let (name, tag) = split_image_ref(image_ref);
@@ -152,6 +190,7 @@ async fn prepare_from_image(
     Ok(ContainerInstance {
         image_name: name,
         image_tag: tag,
+        internal_port,
         mode: ContainerMode::default(),
         members,
     })
@@ -160,6 +199,7 @@ async fn prepare_from_image(
 async fn prepare_from_dockerfile(
     dockerfile: &str,
     source_dir: &Path,
+    internal_port: Option<u16>,
     members: Members,
 ) -> Result<ContainerInstance, RuntimeError> {
     let resolved = source_dir.join(dockerfile);
@@ -187,6 +227,7 @@ async fn prepare_from_dockerfile(
     Ok(ContainerInstance {
         image_name: name,
         image_tag: tag,
+        internal_port,
         mode: ContainerMode::default(),
         members,
     })
@@ -222,7 +263,8 @@ impl Stopped {
         self,
         image_name: &str,
         image_tag: &str,
-        port_kw: Option<&Value>,
+        internal_port: Option<u16>,
+        external_port_kw: Option<&Value>,
         env_kw: Option<&Value>,
         timeout_kw: Option<&Value>,
     ) -> (ContainerMode, RunOutcome) {
@@ -230,25 +272,31 @@ impl Stopped {
         // image already exists locally (eager construct), so `start()` here
         // is purely container-create + run + wait.
         //
-        // `with_exposed_port` is an inherent method on GenericImage (pre-
-        // ContainerRequest), so port exposure has to be applied before the
-        // `.into()` conversion. ImageExt methods (label, env, timeout) all
-        // work on the ContainerRequest afterwards.
+        // Port mapping is user-controlled: `external_port:` (per-invocation
+        // host port) pairs with the actor's declaration-level `internal_port:`
+        // to drive `with_mapped_port(host, container)`. When either side is
+        // missing, we don't publish a port — the container still runs, it
+        // just isn't reachable from the host.
         //
-        // If `port:` was supplied but didn't parse as a u16, surface
-        // `:bad_port` rather than silently starting the container with no
-        // port exposed — the user asked for something and we couldn't
-        // deliver it, so failure is less surprising than success.
-        let exposed_port = match port_kw.map(value_as_u16) {
+        // If `external_port:` is supplied but doesn't parse as a u16, surface
+        // `:bad_port`. Surfacing failure beats silently starting with no
+        // mapping — the user asked for something and we couldn't deliver.
+        let external_port = match external_port_kw.map(value_as_u16) {
             None => None,             // not supplied
             Some(Some(p)) => Some(p), // supplied and valid
             Some(None) => return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT)),
         };
-        let mut image = GenericImage::new(image_name, image_tag);
-        if let Some(p) = exposed_port {
-            image = image.with_exposed_port(p.tcp());
+        // `external_port:` without a declaration-level `internal_port:` is
+        // meaningless — the user asked us to publish on a host port but
+        // didn't say which container port to map from. Surface the same
+        // `:bad_port` atom rather than silently starting with no mapping.
+        if external_port.is_some() && internal_port.is_none() {
+            return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT));
         }
-        let mut req: ContainerRequest<GenericImage> = image.into();
+        let mut req: ContainerRequest<GenericImage> = GenericImage::new(image_name, image_tag).into();
+        if let (Some(host), Some(container)) = (external_port, internal_port) {
+            req = req.with_mapped_port(host, container.tcp());
+        }
         req = req.with_label(LABEL_KEY, LABEL_VALUE);
 
         // Optional: env vars.
@@ -272,15 +320,7 @@ impl Stopped {
         match req.start().await {
             Ok(container) => {
                 let id = container.id().to_string();
-                let host_port = if let Some(p) = exposed_port {
-                    container.get_host_port_ipv4(p.tcp()).await.unwrap_or(0)
-                } else {
-                    0
-                };
-                let ok = RunOk {
-                    id,
-                    port: host_port as i64,
-                };
+                let ok = RunOk { id };
                 (
                     ContainerMode::Running(Running { container }),
                     RunOutcome::Ok(ok.into_dict()),
@@ -384,7 +424,8 @@ impl ActorInstance for ContainerInstance {
                     s.run(
                         &self.image_name,
                         &self.image_tag,
-                        args.kw("port"),
+                        self.internal_port,
+                        args.kw("external_port"),
                         args.kw("env"),
                         args.kw("timeout"),
                     )
@@ -411,19 +452,6 @@ impl ActorInstance for ContainerInstance {
                 ),
             },
         };
-        // Backfill the live host port into `self.port` so other actors that
-        // read `<container>.port` get the dynamically-mapped value, not the
-        // declared one. `Members::set` is a no-op when `port` wasn't
-        // declared on the actor — silent for actors without a `port` var.
-        if cmd == "run" {
-            if let RunOutcome::Ok(ref ok) = outcome {
-                if let Some(Value::Number(p)) = ok.get("port") {
-                    if *p > 0 {
-                        let _ = self.members.set("port", Value::Number(*p));
-                    }
-                }
-            }
-        }
         self.mode = next;
         outcome
     }
@@ -445,7 +473,6 @@ impl ActorInstance for ContainerInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::DeclaredVar;
 
     #[test]
     fn split_image_ref_bare_name_defaults_to_latest() {
@@ -585,73 +612,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires docker"]
-    async fn run_backfills_port_member_with_mapped_host_port() {
-        // Postgres exposes 5432 inside the container; testcontainers maps
-        // that to a random host port. After `run`, `self_view().port` must
-        // be that host port, not the declared 5432 — that's the value
-        // other actors connect to via `<container>.port`.
-        let mut kw = Dict::new();
-        kw.insert("image".into(), Value::String("postgres:18".into()));
-        let args = ConstructArgs {
-            keyword: kw,
-            source_dir: std::env::temp_dir(),
-            vars: vec![DeclaredVar {
-                name: "port".into(),
-                default: Some(Value::Number(5432)),
-            }],
-        };
-        let mut inst = ContainerInstance::construct(&args)
-            .await
-            .ok()
-            .expect("construct failed");
-
-        // Pre-run: self_view sees the declared default.
-        let pre = inst.self_view().expect("self_view populated");
-        assert_eq!(pre.get("port"), Some(&Value::Number(5432)));
-
-        // Postgres needs a password to start.
-        let mut env = Dict::new();
-        env.insert("POSTGRES_PASSWORD".into(), Value::String("pw".into()));
-        let mut run_kw = Dict::new();
-        run_kw.insert("port".into(), Value::Number(5432));
-        run_kw.insert("env".into(), Value::Dict(env));
-        let outcome = inst
-            .execute(
-                "run",
-                &CommandArgs {
-                    positional: Vec::new(),
-                    keyword: run_kw,
-                },
-            )
-            .await;
-        let mapped = match outcome {
-            RunOutcome::Ok(fields) => match fields.get("port") {
-                Some(Value::Number(p)) => *p,
-                other => panic!("expected ok.port number, got {other:?}"),
-            },
-            other => panic!(
-                "expected Ok from run, got {other:?}",
-                other = match other {
-                    RunOutcome::Error { variant, fields } =>
-                        format!("Error({variant}, {fields:?})"),
-                    RunOutcome::NotImplemented { actor, cmd } =>
-                        format!("NotImplemented({actor}, {cmd})"),
-                    RunOutcome::Ok(_) => unreachable!(),
-                }
-            ),
-        };
-        assert!(mapped > 0, "host port should be > 0");
-        assert_ne!(mapped, 5432, "host port should differ from container port");
-
-        // Post-run: self_view reflects the mapped host port.
-        let post = inst.self_view().expect("self_view populated");
-        assert_eq!(post.get("port"), Some(&Value::Number(mapped)));
-
-        let _ = inst.teardown().await;
-    }
-
-    #[tokio::test]
-    #[ignore = "requires docker"]
     async fn nonexistent_image_fails_at_construct() {
         // Image refs under `localhost/` won't resolve anywhere, so the pull
         // fails with a real daemon error — the shape we want at construct.
@@ -717,8 +677,33 @@ mod tests {
             .expect("construct failed");
         let mut kw = Dict::new();
         // Out of u16 range — should surface `:bad_port`, not silently start
-        // the container with no port exposed.
-        kw.insert("port".into(), Value::Number(70_000));
+        // the container with no port mapping.
+        kw.insert("external_port".into(), Value::Number(70_000));
+        let outcome = inst
+            .execute(
+                "run",
+                &CommandArgs {
+                    positional: Vec::new(),
+                    keyword: kw,
+                },
+            )
+            .await;
+        assert_container_reason(&outcome, "bad_port");
+        assert!(matches!(inst.mode, ContainerMode::Stopped(_)));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn external_port_without_internal_port_returns_bad_port() {
+        // `external_port:` on `run` is meaningless without a declaration-
+        // level `internal_port:` — the runtime should reject rather than
+        // silently start with no port mapping.
+        let mut inst = ContainerInstance::construct(&image_args("alpine:3.19"))
+            .await
+            .ok()
+            .expect("construct failed");
+        let mut kw = Dict::new();
+        kw.insert("external_port".into(), Value::Number(8080));
         let outcome = inst
             .execute(
                 "run",
@@ -812,4 +797,54 @@ mod tests {
         };
         let _msg = expect_construct_err(ContainerInstance::construct(&args).await);
     }
+
+    #[tokio::test]
+    async fn internal_port_out_of_u16_range_rejected_at_construct() {
+        // No docker needed — `internal_port` validation runs before any
+        // image I/O. Both negative and above-u16 produce a Construct error
+        // rather than silently truncating.
+        for n in [-1i64, 70_000] {
+            let mut kw = Dict::new();
+            kw.insert("image".into(), Value::String("alpine:3.19".into()));
+            kw.insert("internal_port".into(), Value::Number(n));
+            let args = ConstructArgs {
+                keyword: kw,
+                source_dir: std::env::temp_dir(),
+                ..Default::default()
+            };
+            let msg = expect_construct_err(ContainerInstance::construct(&args).await);
+            assert!(msg.contains("u16"), "n={n}, unexpected message: {msg}");
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_port_wrong_type_rejected_at_construct() {
+        // A string where a number is required should surface as TypeMismatch,
+        // not Construct, matching how `image` and `dockerfile` are handled.
+        let mut kw = Dict::new();
+        kw.insert("image".into(), Value::String("alpine:3.19".into()));
+        kw.insert("internal_port".into(), Value::String("nope".into()));
+        let args = ConstructArgs {
+            keyword: kw,
+            source_dir: std::env::temp_dir(),
+            ..Default::default()
+        };
+        match ContainerInstance::construct(&args).await {
+            Err(RuntimeError::TypeMismatch {
+                expected,
+                got,
+                context,
+            }) => {
+                assert_eq!(expected, "number");
+                assert_eq!(got, "string");
+                assert!(
+                    context.contains("internal_port"),
+                    "unexpected context: {context}"
+                );
+            }
+            Ok(_) => panic!("expected TypeMismatch, got Ok"),
+            Err(_) => panic!("expected TypeMismatch, got different RuntimeError"),
+        }
+    }
+
 }

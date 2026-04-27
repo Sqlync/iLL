@@ -7,6 +7,10 @@
 # step 0: define the "actors" and their member variables up front
 actor db = container,
   image: "postgres:18"
+  internal_port: 5432
+  vars:
+    @access read
+    port: 12345
 actor api = exec,
   command: "python3 manage.py runserver 8080"
 actor alice = http_client,
@@ -23,7 +27,7 @@ as db:
   # Statements can be annotated with documentation, which is surfaced on failure
   @expect "The database needs to start before the REST server and bob's client"
   run,
-    port: 12345
+    external_port: self.port
     env:
       POSTGRES_PASSWORD: "root"
 
@@ -31,7 +35,7 @@ as db:
 as api:
   run,
     env:
-      POSTGRES_PORT: 12345
+      POSTGRES_PORT: db.port
       POSTGRES_PASSWORD: "root"
 
 # step 3: alice signs up via REST api
@@ -51,7 +55,7 @@ as bob:
   connect,
     user: "root"
     password: "root"
-    port: 12345
+    port: db.port
     database: "test"
 
   @expect "Alice should be in the database, with correct name and email"

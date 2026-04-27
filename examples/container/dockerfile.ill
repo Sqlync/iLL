@@ -7,6 +7,7 @@
 
 actor app = container,
   dockerfile: "languages/python.Dockerfile"
+  internal_port: 8080
   vars:
     @access read
     port: 8080
@@ -14,7 +15,7 @@ actor client = http_client
 
 as app:
   run,
-    port: self.port
+    external_port: self.port
 
 as client:
   get "http://localhost:${app.port}/health"

@@ -768,6 +768,7 @@ mod tests {
         let src = "\
 actor db = container,
   image: \"postgres:18\"
+  internal_port: 5432
   vars:
     @access read
     port: 5432
@@ -776,7 +777,7 @@ actor alice = pg_client
 
 as db:
   run,
-    port: self.port
+    external_port: self.port
     env:
       POSTGRES_PASSWORD: \"pw\"
       POSTGRES_USER: \"postgres\"

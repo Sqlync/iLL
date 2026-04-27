@@ -3,11 +3,11 @@ use crate::actor_type::{Command, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField
 use crate::define_outcome;
 
 define_outcome! {
-    /// Result of `container.run` — the started container's id and its mapped
-    /// host port. `port` is 0 when the user did not supply a `port:` kwarg.
+    /// Result of `container.run` — the started container's id. The host port
+    /// is whatever the caller passed as `external_port:` (deterministic) and
+    /// is not republished here.
     pub RunOk {
         id: String,
-        port: Number,
     }
 }
 
@@ -15,7 +15,7 @@ define_outcome! {
     /// Fields on `error.container.*` for failing container commands.
     ///
     /// Atoms produced by `run`: `:timeout`, `:already_running`,
-    /// `:docker_unavailable`, `:bad_env`, `:bad_port`.
+    /// `:docker_unavailable`, `:bad_env`, `:bad_port`, `:port_in_use`.
     ///
     /// Atoms produced by `stop`: `:not_running`, `:timeout`,
     /// `:docker_unavailable`.
@@ -51,8 +51,12 @@ impl Command for Run {
 
     fn keyword(&self) -> &'static [KeywordArgDef] {
         &[
+            // Host-side port to publish the container on. Defaults to no
+            // port mapping when omitted. Paired with the actor's
+            // declaration-level `internal_port:` to drive the host→container
+            // mapping.
             KeywordArgDef {
-                name: "port",
+                name: "external_port",
                 ty: ValueType::Number,
                 required: false,
             },
