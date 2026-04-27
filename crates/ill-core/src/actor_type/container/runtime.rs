@@ -61,8 +61,7 @@ fn run_error(reason: &str) -> RunOutcome {
 /// Map a testcontainers runtime error (from `start()` or `rm()`) to one of
 /// our atom reasons. `StartupTimeout` is structural; port-bind failures
 /// surface only through Docker's error stream, so we string-match the
-/// rendered error chain. Anything we don't recognize collapses to
-/// `:docker_unavailable`.
+/// rendered message. Unrecognized errors collapse to `:docker_unavailable`.
 fn classify_run_error(e: &TestcontainersError) -> &'static str {
     if matches!(
         e,
@@ -70,10 +69,7 @@ fn classify_run_error(e: &TestcontainersError) -> &'static str {
     ) {
         return REASON_TIMEOUT;
     }
-    // Docker's port-bind failure messages: "port is already allocated",
-    // "address already in use", "bind: address already in use". We accept
-    // any of them via lowercase substring match on the full error chain.
-    let rendered = format!("{e:#}").to_lowercase();
+    let rendered = e.to_string();
     if rendered.contains("port is already allocated")
         || rendered.contains("address already in use")
     {
@@ -124,12 +120,14 @@ impl ContainerInstance {
         let dockerfile_kw = args.kw("dockerfile");
         let internal_port = match args.kw("internal_port") {
             None => None,
-            Some(Value::Number(n)) if *n >= 0 && *n <= u16::MAX as i64 => Some(*n as u16),
-            Some(Value::Number(n)) => {
-                return Err(RuntimeError::Construct(format!(
-                    "container `internal_port` {n} is out of range for a u16"
-                )))
-            }
+            Some(Value::Number(n)) => match u16::try_from(*n) {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    return Err(RuntimeError::Construct(format!(
+                        "container `internal_port` {n} is out of range for a u16"
+                    )))
+                }
+            },
             Some(other) => {
                 return Err(RuntimeError::TypeMismatch {
                     expected: "number",
@@ -801,23 +799,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_port_out_of_range_rejected_at_construct() {
-        // No docker needed — `internal_port` validation runs before any image
-        // I/O. Out-of-u16-range should produce a Construct error with a
-        // clear message, not silently truncate.
-        let mut kw = Dict::new();
-        kw.insert("image".into(), Value::String("alpine:3.19".into()));
-        kw.insert("internal_port".into(), Value::Number(70_000));
-        let args = ConstructArgs {
-            keyword: kw,
-            source_dir: std::env::temp_dir(),
-            ..Default::default()
-        };
-        let msg = expect_construct_err(ContainerInstance::construct(&args).await);
-        assert!(
-            msg.contains("internal_port") && msg.contains("u16"),
-            "unexpected message: {msg}"
-        );
+    async fn internal_port_out_of_u16_range_rejected_at_construct() {
+        // No docker needed — `internal_port` validation runs before any
+        // image I/O. Both negative and above-u16 produce a Construct error
+        // rather than silently truncating.
+        for n in [-1i64, 70_000] {
+            let mut kw = Dict::new();
+            kw.insert("image".into(), Value::String("alpine:3.19".into()));
+            kw.insert("internal_port".into(), Value::Number(n));
+            let args = ConstructArgs {
+                keyword: kw,
+                source_dir: std::env::temp_dir(),
+                ..Default::default()
+            };
+            let msg = expect_construct_err(ContainerInstance::construct(&args).await);
+            assert!(msg.contains("u16"), "n={n}, unexpected message: {msg}");
+        }
     }
 
     #[tokio::test]
@@ -850,20 +847,4 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn internal_port_negative_rejected_at_construct() {
-        let mut kw = Dict::new();
-        kw.insert("image".into(), Value::String("alpine:3.19".into()));
-        kw.insert("internal_port".into(), Value::Number(-1));
-        let args = ConstructArgs {
-            keyword: kw,
-            source_dir: std::env::temp_dir(),
-            ..Default::default()
-        };
-        let msg = expect_construct_err(ContainerInstance::construct(&args).await);
-        assert!(
-            msg.contains("internal_port") && msg.contains("u16"),
-            "unexpected message: {msg}"
-        );
-    }
 }
