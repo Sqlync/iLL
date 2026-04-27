@@ -426,7 +426,7 @@ impl<'a> LowerCtx<'a> {
     // ── Commands ───────────────────────────────────────────────────────────
 
     fn lower_command(&mut self, node: tree_sitter::Node) -> Option<Command> {
-        let name = self.lower_ident_field(node, "name")?;
+        let mut name = self.lower_ident_field(node, "name")?;
         let mut annotation = None;
         let mut positional_args = Vec::new();
         let mut keyword_args = Vec::new();
@@ -448,6 +448,8 @@ impl<'a> LowerCtx<'a> {
                 _ => {}
             }
         }
+
+        rewrite_event_command(&mut name, &mut positional_args);
 
         Some(Command {
             annotation,
@@ -846,6 +848,28 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
+// ── Sugar rewrites ─────────────────────────────────────────────────────────────
+//
+// `receive publish` / `receive disconnect` are surface syntax for the
+// `receive_publish` / `receive_disconnect` commands. The event keyword is
+// parsed as a bare ident positional, and we fuse it into the command name
+// here so the validator and runtime see a single statically-typed command.
+// Keep this list narrow: a bare-ident positional otherwise reads as a value
+// expression (e.g. a variable reference), and rewriting it would silently
+// mangle real code.
+const EVENT_FUSED_COMMANDS: &[&str] = &["receive"];
+
+fn rewrite_event_command(name: &mut Ident, positional_args: &mut Vec<Expr>) {
+    if !EVENT_FUSED_COMMANDS.contains(&name.name.as_str()) {
+        return;
+    }
+    let Some(Expr::Ident(event)) = positional_args.first() else {
+        return;
+    };
+    name.name = format!("{}_{}", name.name, event.name);
+    positional_args.remove(0);
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -893,6 +917,61 @@ mod tests {
         match &sq.fragments[0] {
             StringFragment::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected text fragment"),
+        }
+    }
+
+    // ── Sugar rewrites ─────────────────────────────────────────────────────
+
+    fn first_command(source: &str) -> Command {
+        let file = lower(source).expect("should lower");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+        match &as_block.body[0] {
+            Statement::Command(c) => c.clone(),
+            _ => panic!("expected command"),
+        }
+    }
+
+    #[test]
+    fn receive_publish_fuses_into_receive_publish_command() {
+        let cmd = first_command("actor a = mqtt_client\nas a:\n  receive publish\n");
+        assert_eq!(cmd.name.name, "receive_publish");
+        assert!(cmd.positional_args.is_empty());
+    }
+
+    #[test]
+    fn receive_disconnect_fuses_into_receive_disconnect_command() {
+        let cmd = first_command("actor a = mqtt_client\nas a:\n  receive disconnect\n");
+        assert_eq!(cmd.name.name, "receive_disconnect");
+        assert!(cmd.positional_args.is_empty());
+    }
+
+    #[test]
+    fn receive_with_kwargs_keeps_them_after_rewrite() {
+        let cmd = first_command("actor a = mqtt_client\nas a:\n  receive publish, timeout: 2\n");
+        assert_eq!(cmd.name.name, "receive_publish");
+        assert!(cmd.positional_args.is_empty());
+        assert_eq!(cmd.keyword_args.len(), 1);
+        assert_eq!(cmd.keyword_args[0].key.name, "timeout");
+    }
+
+    #[test]
+    fn non_event_command_with_ident_positional_is_not_rewritten() {
+        // `cmd foo` with an unknown command name and a bare ident positional
+        // must not be touched by the rewrite — bare idents are valid value
+        // expressions (e.g. variable references).
+        let cmd = first_command("actor a = container\nas a:\n  cmd foo\n");
+        assert_eq!(cmd.name.name, "cmd");
+        assert_eq!(cmd.positional_args.len(), 1);
+        match &cmd.positional_args[0] {
+            Expr::Ident(i) => assert_eq!(i.name, "foo"),
+            other => panic!("expected ident, got {other:?}"),
         }
     }
 

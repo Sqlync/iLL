@@ -31,7 +31,8 @@ impl ActorType for MqttClient {
             commands::PUBLISH_0,
             commands::PUBLISH_1,
             commands::PUBLISH_2,
-            commands::RECEIVE,
+            commands::RECEIVE_PUBLISH,
+            commands::RECEIVE_DISCONNECT,
         ];
         COMMANDS
     }
