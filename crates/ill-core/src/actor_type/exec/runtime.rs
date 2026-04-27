@@ -348,12 +348,30 @@ mod tests {
     use super::*;
     use crate::runtime::Dict;
 
+    /// Default-shape `ConstructArgs` for the common case: `command` only,
+    /// `source_dir = std::env::temp_dir()`, no `cwd:`. Tests that need a
+    /// real on-disk source dir or a `cwd:` override use `construct_args_with`
+    /// directly.
     fn construct_args(target: &str) -> ConstructArgs {
+        construct_args_with(target, std::env::temp_dir(), None)
+    }
+
+    /// Build `ConstructArgs` with a `command` and an explicit `source_dir`,
+    /// optionally pinning a `cwd` kwarg. The single source of truth for
+    /// constructing exec-actor test args; `construct_args` delegates here.
+    fn construct_args_with(
+        target: &str,
+        source_dir: PathBuf,
+        cwd: Option<&str>,
+    ) -> ConstructArgs {
         let mut kw = Dict::new();
         kw.insert("command".into(), Value::String(target.into()));
+        if let Some(c) = cwd {
+            kw.insert("cwd".into(), Value::String(c.into()));
+        }
         ConstructArgs {
             keyword: kw,
-            source_dir: std::env::temp_dir(),
+            source_dir,
             ..Default::default()
         }
     }
@@ -362,6 +380,45 @@ mod tests {
         CommandArgs {
             positional: Vec::new(),
             keyword: Dict::new(),
+        }
+    }
+
+    /// Build a fresh, unique tempdir for tests that need a real directory on
+    /// disk (cwd resolution, marker-file checks). Caller is responsible for
+    /// `remove_dir_all` cleanup.
+    fn unique_tempdir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ill-exec-test-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Poll for a file to appear, up to ~2s. Used to confirm a spawned child
+    /// ran in the expected working directory by having it `touch` a marker.
+    async fn wait_for_file(path: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("marker file {} did not appear", path.display());
+    }
+
+    /// Run `ExecInstance::construct(args)` and return the error, panicking
+    /// if it unexpectedly succeeded. We can't use `Result::unwrap_err`
+    /// because `ExecInstance` doesn't implement `Debug`.
+    fn expect_construct_err(args: &ConstructArgs) -> RuntimeError {
+        match ExecInstance::construct(args) {
+            Ok(_) => panic!("expected construct error, got Ok"),
+            Err(e) => e,
         }
     }
 
@@ -580,55 +637,6 @@ mod tests {
         assert!(td.ok);
     }
 
-    /// Helper: build a fresh, unique tempdir for tests that need a real
-    /// directory on disk (cwd resolution, marker-file checks). Caller is
-    /// responsible for `remove_dir_all` cleanup.
-    fn unique_tempdir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ill-exec-test-{label}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    /// Build `ConstructArgs` with a `command` and an explicit `source_dir`,
-    /// optionally pinning a `cwd` kwarg. Mirrors the existing `construct_args`
-    /// helper but parameterised for cwd-resolution tests.
-    fn construct_args_with(
-        target: &str,
-        source_dir: PathBuf,
-        cwd: Option<&str>,
-    ) -> ConstructArgs {
-        let mut kw = Dict::new();
-        kw.insert("command".into(), Value::String(target.into()));
-        if let Some(c) = cwd {
-            kw.insert("cwd".into(), Value::String(c.into()));
-        }
-        ConstructArgs {
-            keyword: kw,
-            source_dir,
-            ..Default::default()
-        }
-    }
-
-    /// Poll for a file to appear, up to ~2s. Used to confirm a spawned child
-    /// ran in the expected working directory by having it `touch` a marker.
-    async fn wait_for_file(path: &Path) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while std::time::Instant::now() < deadline {
-            if path.exists() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        panic!("marker file {} did not appear", path.display());
-    }
-
     #[tokio::test]
     #[cfg(unix)]
     async fn cwd_relative_resolves_against_source_dir() {
@@ -686,6 +694,64 @@ mod tests {
 
     #[tokio::test]
     #[cfg(unix)]
+    async fn program_lookup_uses_source_dir_when_cwd_overridden() {
+        // Invariant: relative `command` programs (e.g. `./helper.sh`) resolve
+        // against the .ill file's directory regardless of `cwd:`. Layout:
+        //   <root>/source/helper.sh   ← the program; only exists here
+        //   <root>/elsewhere/         ← cwd target; helper is NOT here
+        // If `Stopped::run` ever swaps `source_dir` for `working_dir` in the
+        // `resolve_program` call, the spawn becomes `:command_not_found`
+        // because `./helper.sh` would be looked up in `elsewhere/`.
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = unique_tempdir("program-lookup");
+        let source_dir = root.join("source");
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        // helper writes its cwd-marker into `.` so we can also confirm the
+        // child ran in `elsewhere`, not `source_dir`.
+        let helper = source_dir.join("helper.sh");
+        std::fs::write(&helper, "#!/bin/sh\ntouch ran\nsleep 60\n").unwrap();
+        let mut perms = std::fs::metadata(&helper).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&helper, perms).unwrap();
+
+        let args = construct_args_with(
+            "./helper.sh",
+            source_dir.clone(),
+            Some(elsewhere.to_str().unwrap()),
+        );
+        let mut inst = ExecInstance::construct(&args).unwrap();
+        let outcome = inst.execute("run", &empty_args()).await;
+        // Spawn must succeed: program lookup found helper.sh in source_dir
+        // even though cwd is elsewhere. A regression here would surface as
+        // RunOutcome::Error with reason `:command_not_found`.
+        match outcome {
+            RunOutcome::Ok(_) => {}
+            RunOutcome::Error { variant, fields } => panic!(
+                "expected Ok (proves program lookup uses source_dir), got Error: \
+                 variant={variant}, fields={fields:?}"
+            ),
+            RunOutcome::NotImplemented { .. } => panic!("expected Ok"),
+        }
+
+        // Belt-and-suspenders: confirm the child actually ran in `elsewhere`.
+        // Together with the spawn-success above, this pins down both halves
+        // of the source_dir/working_dir split.
+        wait_for_file(&elsewhere.join("ran")).await;
+        assert!(
+            !source_dir.join("ran").exists(),
+            "child should have run in `elsewhere`, not `source_dir`"
+        );
+
+        let _ = inst.teardown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
     async fn cwd_absent_uses_source_dir() {
         // Default behaviour: with no cwd kwarg, child runs in source_dir.
         let source_dir = unique_tempdir("cwd-default");
@@ -698,16 +764,6 @@ mod tests {
 
         let _ = inst.teardown().await;
         let _ = std::fs::remove_dir_all(&source_dir);
-    }
-
-    /// Run `ExecInstance::construct(args)` and return the error, panicking
-    /// if it unexpectedly succeeded. We can't use `Result::unwrap_err`
-    /// because `ExecInstance` doesn't implement `Debug`.
-    fn expect_construct_err(args: &ConstructArgs) -> RuntimeError {
-        match ExecInstance::construct(args) {
-            Ok(_) => panic!("expected construct error, got Ok"),
-            Err(e) => e,
-        }
     }
 
     #[test]
