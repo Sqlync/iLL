@@ -34,11 +34,6 @@ impl ActorType for Exec {
     }
 
     fn constructor_keyword(&self) -> &'static [KeywordArgDef] {
-        // `cwd` overrides the working directory the child process is spawned
-        // in. Defaults to the `.ill` file's directory (so relative `command`
-        // paths and child-process file lookups stay anchored to the test).
-        // Relative `cwd` values resolve against the same `.ill` directory;
-        // absolute values are used as-is.
         &[
             KeywordArgDef {
                 name: "command",

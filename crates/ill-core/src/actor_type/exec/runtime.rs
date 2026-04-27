@@ -171,11 +171,6 @@ impl Stopped {
 
     /// Spawn the configured target. On success, transitions to `Running`;
     /// on any pre-spawn or spawn error, stays in `Stopped`.
-    ///
-    /// `source_dir` and `working_dir` differ when the user supplied `cwd:`.
-    /// Program lookup uses `source_dir` (so `./script.sh` always means
-    /// "next to the .ill file"), while the spawned child runs in
-    /// `working_dir` (the user's chosen target directory).
     async fn run(
         self,
         target: &str,
@@ -412,9 +407,6 @@ mod tests {
         panic!("marker file {} did not appear", path.display());
     }
 
-    /// Run `ExecInstance::construct(args)` and return the error, panicking
-    /// if it unexpectedly succeeded. We can't use `Result::unwrap_err`
-    /// because `ExecInstance` doesn't implement `Debug`.
     fn expect_construct_err(args: &ConstructArgs) -> RuntimeError {
         match ExecInstance::construct(args) {
             Ok(_) => panic!("expected construct error, got Ok"),
@@ -522,27 +514,12 @@ mod tests {
         // surfaces as `PermissionDenied`.
         use std::io::Write;
 
-        let dir = std::env::temp_dir().join(format!(
-            "ill-exec-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = unique_tempdir("non-exec");
         let path = dir.join("not_executable");
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "#!/bin/sh\necho hi").unwrap();
 
-        let target = path.to_str().unwrap().to_string();
-        let mut kw = Dict::new();
-        kw.insert("command".into(), Value::String(target));
-        let args = ConstructArgs {
-            keyword: kw,
-            source_dir: dir.clone(),
-            ..Default::default()
-        };
+        let args = construct_args_with(path.to_str().unwrap(), dir.clone(), None);
         let mut inst = ExecInstance::construct(&args).unwrap();
         let outcome = inst.execute("run", &empty_args()).await;
         assert_exec_reason(&outcome, "permission_denied");
@@ -767,42 +744,50 @@ mod tests {
     }
 
     #[test]
-    fn cwd_nonexistent_fails_construct() {
-        let source_dir = unique_tempdir("cwd-missing");
-        let args = construct_args_with("true", source_dir.clone(), Some("does_not_exist"));
-        let err = expect_construct_err(&args);
-        assert!(
-            matches!(&err, RuntimeError::Construct(m) if m.contains("does not exist")),
-            "expected Construct error mentioning 'does not exist', got {err:?}"
-        );
-        let _ = std::fs::remove_dir_all(&source_dir);
-    }
-
-    #[test]
-    fn cwd_pointing_at_file_fails_construct() {
-        let source_dir = unique_tempdir("cwd-isfile");
-        let file_path = source_dir.join("not_a_dir");
-        std::fs::write(&file_path, b"").unwrap();
-
-        let args = construct_args_with("true", source_dir.clone(), Some("not_a_dir"));
-        let err = expect_construct_err(&args);
-        assert!(
-            matches!(&err, RuntimeError::Construct(m) if m.contains("not a directory")),
-            "expected Construct error mentioning 'not a directory', got {err:?}"
-        );
-        let _ = std::fs::remove_dir_all(&source_dir);
-    }
-
-    #[test]
-    fn cwd_empty_string_fails_construct() {
-        let source_dir = unique_tempdir("cwd-empty");
-        let args = construct_args_with("true", source_dir.clone(), Some(""));
-        let err = expect_construct_err(&args);
-        assert!(
-            matches!(&err, RuntimeError::Construct(m) if m.contains("must not be empty")),
-            "expected Construct error about empty cwd, got {err:?}"
-        );
-        let _ = std::fs::remove_dir_all(&source_dir);
+    fn cwd_construct_failures() {
+        struct Case {
+            name: &'static str,
+            cwd: &'static str,
+            /// Optional file to create in `source_dir` before constructing,
+            /// covering the "cwd points at a regular file" case.
+            setup_file: Option<&'static str>,
+            needle: &'static str,
+        }
+        let cases = [
+            Case {
+                name: "nonexistent",
+                cwd: "does_not_exist",
+                setup_file: None,
+                needle: "does not exist",
+            },
+            Case {
+                name: "is_a_file",
+                cwd: "not_a_dir",
+                setup_file: Some("not_a_dir"),
+                needle: "not a directory",
+            },
+            Case {
+                name: "empty_string",
+                cwd: "",
+                setup_file: None,
+                needle: "must not be empty",
+            },
+        ];
+        for case in cases {
+            let source_dir = unique_tempdir(&format!("cwd-fail-{}", case.name));
+            if let Some(name) = case.setup_file {
+                std::fs::write(source_dir.join(name), b"").unwrap();
+            }
+            let args = construct_args_with("true", source_dir.clone(), Some(case.cwd));
+            let err = expect_construct_err(&args);
+            assert!(
+                matches!(&err, RuntimeError::Construct(m) if m.contains(case.needle)),
+                "[{}] expected Construct error containing '{}', got {err:?}",
+                case.name,
+                case.needle,
+            );
+            let _ = std::fs::remove_dir_all(&source_dir);
+        }
     }
 
     #[test]
