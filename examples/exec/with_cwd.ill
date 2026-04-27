@@ -1,0 +1,24 @@
+# exec with cwd
+#
+# demonstrates pointing exec at a project that lives outside the .ill file's
+# directory. cwd defaults to the .ill file's directory; set it explicitly
+# when the thing you want to run lives elsewhere — typical for a test that
+# orchestrates a separate project (e.g. a sibling rust crate, a firmware
+# tree, a cloud service repo).
+#
+# cwd resolution:
+#   - relative paths resolve against the .ill file's directory
+#   - absolute paths are used as-is
+#   - the directory must exist at construct time, otherwise the test fails
+#     fast with a clear error rather than a confusing :command_not_found
+#
+# the program lookup still uses the .ill file's directory (so `./helper.sh`
+# means "next to this test"), only the spawned child's working directory
+# changes.
+
+actor app = exec,
+  command: "python3 -m http.server 8080"
+  cwd: "../container"
+
+as app:
+  run

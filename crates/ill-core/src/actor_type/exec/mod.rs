@@ -34,11 +34,18 @@ impl ActorType for Exec {
     }
 
     fn constructor_keyword(&self) -> &'static [KeywordArgDef] {
-        &[KeywordArgDef {
-            name: "command",
-            ty: ValueType::String,
-            required: true,
-        }]
+        &[
+            KeywordArgDef {
+                name: "command",
+                ty: ValueType::String,
+                required: true,
+            },
+            KeywordArgDef {
+                name: "cwd",
+                ty: ValueType::String,
+                required: false,
+            },
+        ]
     }
 
     async fn construct(
