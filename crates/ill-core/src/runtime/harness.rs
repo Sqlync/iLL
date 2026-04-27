@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::actor_type::ActorInstance;
+use crate::actor_type::{unknown_command_message, ActorInstance};
 use crate::ast::{
     ActorDeclaration, AsBlock, Command as CommandAst, Expr, KeywordArg, KeywordValue, Let,
     LetValue, SourceFile, Statement, TopLevel,
@@ -176,18 +176,14 @@ async fn run_as_block(
                 // Validator should have caught an unknown command; be defensive.
                 let (cmd_def, consumed) = actor_type
                     .resolve_command(&cmd.name.name, &cmd.positional_args)
-                    .ok_or_else(|| {
-                        let message =
-                            if let Some(Expr::Ident(event)) = cmd.positional_args.first() {
-                                format!("unknown command `{} {}`", cmd.name.name, event.name)
-                            } else {
-                                format!("unknown command `{}`", cmd.name.name)
-                            };
-                        StatementReport::EvalError {
-                            actor: actor_name.clone(),
-                            span: cmd.span,
-                            message,
-                        }
+                    .ok_or_else(|| StatementReport::EvalError {
+                        actor: actor_name.clone(),
+                        span: cmd.span,
+                        message: unknown_command_message(
+                            actor_type.name(),
+                            &cmd.name.name,
+                            &cmd.positional_args,
+                        ),
                     })?;
 
                 let args = eval_command_args(cmd, consumed, &scope).map_err(|e| {

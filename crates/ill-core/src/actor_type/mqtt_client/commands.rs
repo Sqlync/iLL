@@ -3,131 +3,42 @@ use crate::actor_type::{
     ArgDef, Command, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType,
 };
 use crate::define_outcome;
-use crate::runtime::{Dict, Value};
 
 // ── Outcome shapes ────────────────────────────────────────────────────────────
 //
-// `Connect` / `receive_publish` / `receive_disconnect` carry MQTT v5 user
-// properties — a key→value map declared as `ValueType::Dict`, and an MQTT
-// payload declared as `ValueType::Bytes` (MQTT payloads are wire-bytes; the
-// assertion layer is responsible for any byte/string coercion at compare
-// time). These outcome structs are hand-written so non-scalar fields keep
-// their concrete Rust types; pure-scalar shapes still go through
-// `define_outcome!`.
+// MQTT payloads are wire-bytes, so `payload` is `Bytes`; `user_properties` is
+// a v5 key→value map (`Dict`). Byte/string coercion in payload assertions is
+// the assertion layer's job.
 
-/// `connect` ok shape. `session_present` is the CONNACK flag;
-/// `assigned_client_id` is the broker-assigned client identifier (empty
-/// string when the client supplied its own); `user_properties` is the dict
-/// of CONNACK user properties.
-pub struct ConnectOk {
-    pub session_present: bool,
-    pub assigned_client_id: String,
-    pub user_properties: Dict,
-}
-
-impl ConnectOk {
-    pub const FIELDS: &'static [OutcomeField] = &[
-        OutcomeField {
-            name: "session_present",
-            ty: ValueType::Bool,
-        },
-        OutcomeField {
-            name: "assigned_client_id",
-            ty: ValueType::String,
-        },
-        OutcomeField {
-            name: "user_properties",
-            ty: ValueType::Dict,
-        },
-    ];
-
-    pub fn into_dict(self) -> Dict {
-        let mut m = Dict::new();
-        m.insert(
-            "session_present".into(),
-            Value::Bool(self.session_present),
-        );
-        m.insert(
-            "assigned_client_id".into(),
-            Value::String(self.assigned_client_id),
-        );
-        m.insert(
-            "user_properties".into(),
-            Value::Dict(self.user_properties),
-        );
-        m
+define_outcome! {
+    /// `connect` ok shape. `session_present` is the CONNACK flag;
+    /// `assigned_client_id` is the broker-assigned client identifier (empty
+    /// string when the client supplied its own); `user_properties` is the
+    /// dict of CONNACK user properties.
+    pub ConnectOk {
+        session_present: Bool,
+        assigned_client_id: String,
+        user_properties: Dict,
     }
 }
 
-/// `receive_publish` ok shape. `payload` is the wire bytes of the publish;
-/// `qos` is the published QoS as observed by the subscriber.
-pub struct ReceivePublishOk {
-    pub topic: String,
-    pub payload: Vec<u8>,
-    pub qos: i64,
-    pub user_properties: Dict,
-}
-
-impl ReceivePublishOk {
-    pub const FIELDS: &'static [OutcomeField] = &[
-        OutcomeField {
-            name: "topic",
-            ty: ValueType::String,
-        },
-        OutcomeField {
-            name: "payload",
-            ty: ValueType::Bytes,
-        },
-        OutcomeField {
-            name: "qos",
-            ty: ValueType::Number,
-        },
-        OutcomeField {
-            name: "user_properties",
-            ty: ValueType::Dict,
-        },
-    ];
-
-    pub fn into_dict(self) -> Dict {
-        let mut m = Dict::new();
-        m.insert("topic".into(), Value::String(self.topic));
-        m.insert("payload".into(), Value::Bytes(self.payload));
-        m.insert("qos".into(), Value::Number(self.qos));
-        m.insert(
-            "user_properties".into(),
-            Value::Dict(self.user_properties),
-        );
-        m
+define_outcome! {
+    /// `receive_publish` ok shape. `payload` is the wire bytes of the
+    /// publish; `qos` is the published QoS as observed by the subscriber.
+    pub ReceivePublishOk {
+        topic: String,
+        payload: Bytes,
+        qos: Number,
+        user_properties: Dict,
     }
 }
 
-/// `receive_disconnect` ok shape — the broker pushed a DISCONNECT frame.
-/// `reason_code` is the v5 reason code (e.g. 142 for session takeover).
-pub struct ReceiveDisconnectOk {
-    pub reason_code: i64,
-    pub user_properties: Dict,
-}
-
-impl ReceiveDisconnectOk {
-    pub const FIELDS: &'static [OutcomeField] = &[
-        OutcomeField {
-            name: "reason_code",
-            ty: ValueType::Number,
-        },
-        OutcomeField {
-            name: "user_properties",
-            ty: ValueType::Dict,
-        },
-    ];
-
-    pub fn into_dict(self) -> Dict {
-        let mut m = Dict::new();
-        m.insert("reason_code".into(), Value::Number(self.reason_code));
-        m.insert(
-            "user_properties".into(),
-            Value::Dict(self.user_properties),
-        );
-        m
+define_outcome! {
+    /// `receive_disconnect` ok shape — the broker pushed a DISCONNECT frame.
+    /// `reason_code` is the v5 reason code (e.g. 142 for session takeover).
+    pub ReceiveDisconnectOk {
+        reason_code: Number,
+        user_properties: Dict,
     }
 }
 
@@ -170,7 +81,10 @@ define_outcome! {
 // not the validator. `Publish_0` has no broker round-trip — only client-side
 // rejections (e.g. invalid topic) come back through `error.mqtt`.
 
-static CONNECT_ERROR_TYPES: &[ErrorTypeDef] = &[
+/// Most commands that traverse the wire can fail either way: the connection
+/// itself drops (`network`) or the broker rejects with a v5 reason code
+/// (`mqtt`). Used by `connect`, `subscribe_*`, and `publish_1` / `publish_2`.
+static NETWORK_AND_MQTT_ERROR_TYPES: &[ErrorTypeDef] = &[
     ErrorTypeDef {
         name: "network",
         fields: NetworkError::FIELDS,
@@ -181,32 +95,13 @@ static CONNECT_ERROR_TYPES: &[ErrorTypeDef] = &[
     },
 ];
 
-static SUBSCRIBE_ERROR_TYPES: &[ErrorTypeDef] = &[
-    ErrorTypeDef {
-        name: "network",
-        fields: NetworkError::FIELDS,
-    },
-    ErrorTypeDef {
-        name: "mqtt",
-        fields: MqttError::FIELDS,
-    },
-];
-
+/// `publish_0` is fire-and-forget — there's no broker round-trip and
+/// therefore no `network` failure surface; only client-side rejections
+/// (e.g. invalid topic) show up.
 static PUBLISH_QOS0_ERROR_TYPES: &[ErrorTypeDef] = &[ErrorTypeDef {
     name: "mqtt",
     fields: MqttError::FIELDS,
 }];
-
-static PUBLISH_QOSN_ERROR_TYPES: &[ErrorTypeDef] = &[
-    ErrorTypeDef {
-        name: "network",
-        fields: NetworkError::FIELDS,
-    },
-    ErrorTypeDef {
-        name: "mqtt",
-        fields: MqttError::FIELDS,
-    },
-];
 
 static RECEIVE_ERROR_TYPES: &[ErrorTypeDef] = &[
     ErrorTypeDef {
@@ -281,7 +176,7 @@ impl Command for Connect {
         ConnectOk::FIELDS
     }
     fn error_types(&self) -> &'static [ErrorTypeDef] {
-        CONNECT_ERROR_TYPES
+        NETWORK_AND_MQTT_ERROR_TYPES
     }
 }
 
@@ -339,7 +234,7 @@ macro_rules! subscribe_cmd {
                 }]
             }
             fn error_types(&self) -> &'static [ErrorTypeDef] {
-                SUBSCRIBE_ERROR_TYPES
+                NETWORK_AND_MQTT_ERROR_TYPES
             }
         }
         pub static $static: &dyn Command = &$struct;
@@ -390,8 +285,8 @@ subscribe_cmd!(Subscribe1, "subscribe_1", SUBSCRIBE_1);
 subscribe_cmd!(Subscribe2, "subscribe_2", SUBSCRIBE_2);
 
 publish_cmd!(Publish0, "publish_0", PUBLISH_0, PUBLISH_QOS0_ERROR_TYPES);
-publish_cmd!(Publish1, "publish_1", PUBLISH_1, PUBLISH_QOSN_ERROR_TYPES);
-publish_cmd!(Publish2, "publish_2", PUBLISH_2, PUBLISH_QOSN_ERROR_TYPES);
+publish_cmd!(Publish1, "publish_1", PUBLISH_1, NETWORK_AND_MQTT_ERROR_TYPES);
+publish_cmd!(Publish2, "publish_2", PUBLISH_2, NETWORK_AND_MQTT_ERROR_TYPES);
 
 // ── Receive: split into receive_publish / receive_disconnect ─────────────────
 //
@@ -434,8 +329,6 @@ impl Command for ReceiveDisconnect {
         static VALID: &[&dyn Mode] = &[CONNECTED];
         VALID
     }
-    /// A broker DISCONNECT terminates the session; once observed, the actor
-    /// is back in `disconnected`.
     fn transitions_to(&self) -> Option<&'static dyn Mode> {
         Some(DISCONNECTED)
     }

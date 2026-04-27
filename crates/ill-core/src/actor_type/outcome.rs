@@ -19,6 +19,7 @@ macro_rules! __outcome_rust_type {
     (Bool)   => { bool };
     (Atom)   => { ::std::string::String };
     (Bytes)  => { ::std::vec::Vec<u8> };
+    (Dict)   => { $crate::runtime::Dict };
 }
 
 #[doc(hidden)]
@@ -38,6 +39,9 @@ macro_rules! __outcome_wrap {
     };
     (Bytes,  $e:expr) => {
         $crate::runtime::Value::Bytes($e)
+    };
+    (Dict,   $e:expr) => {
+        $crate::runtime::Value::Dict($e)
     };
 }
 

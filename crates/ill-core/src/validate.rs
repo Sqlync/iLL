@@ -13,7 +13,9 @@
 
 use std::collections::HashMap;
 
-use crate::actor_type::{ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType};
+use crate::actor_type::{
+    unknown_command_message, ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType,
+};
 use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
@@ -471,21 +473,6 @@ impl<'r> Validator<'r> {
             }
             _ => expr_type(expr),
         }
-    }
-}
-
-/// Format an "unknown command" diagnostic. When the source spelling has a
-/// leading bare-ident positional (e.g. `receive bogus`), name it explicitly
-/// — that's almost always the real source of the problem, not the bare
-/// command keyword.
-fn unknown_command_message(actor_type: &str, name: &str, positional: &[Expr]) -> String {
-    if let Some(Expr::Ident(event)) = positional.first() {
-        format!(
-            "unknown command `{} {}` for actor type `{}`",
-            name, event.name, actor_type
-        )
-    } else {
-        format!("unknown command `{name}` for actor type `{actor_type}`")
     }
 }
 

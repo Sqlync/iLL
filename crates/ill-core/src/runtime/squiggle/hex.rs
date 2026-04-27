@@ -26,7 +26,8 @@ impl Squiggle for Hex {
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, RuntimeError> {
-    let mut nibbles: Vec<u8> = Vec::with_capacity(s.len());
+    let mut bytes: Vec<u8> = Vec::with_capacity(s.len() / 2);
+    let mut high: Option<u8> = None;
     for ch in s.chars() {
         if ch.is_ascii_whitespace() {
             continue;
@@ -41,18 +42,17 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, RuntimeError> {
                 )))
             }
         };
-        nibbles.push(n);
+        match high.take() {
+            None => high = Some(n),
+            Some(hi) => bytes.push((hi << 4) | n),
+        }
     }
-    if nibbles.len() % 2 != 0 {
-        return Err(RuntimeError::Eval(format!(
-            "~hex literal has odd nibble count ({})",
-            nibbles.len()
-        )));
+    if high.is_some() {
+        return Err(RuntimeError::Eval(
+            "~hex literal has odd nibble count".into(),
+        ));
     }
-    Ok(nibbles
-        .chunks_exact(2)
-        .map(|pair| (pair[0] << 4) | pair[1])
-        .collect())
+    Ok(bytes)
 }
 
 #[cfg(test)]

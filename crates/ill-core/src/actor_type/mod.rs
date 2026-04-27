@@ -211,6 +211,22 @@ pub trait ActorType: Send + Sync + 'static {
     }
 }
 
+/// Format an "unknown command" diagnostic. When the source spelling has a
+/// leading bare-ident positional (e.g. mqtt's `receive bogus`), name it
+/// explicitly — that's almost always the real source of the problem, not
+/// the bare command keyword. Shared by the validator and the harness so
+/// both layers report the same message.
+pub fn unknown_command_message(actor_type: &str, name: &str, positional: &[Expr]) -> String {
+    if let Some(Expr::Ident(event)) = positional.first() {
+        format!(
+            "unknown command `{name} {}` for actor type `{actor_type}`",
+            event.name
+        )
+    } else {
+        format!("unknown command `{name}` for actor type `{actor_type}`")
+    }
+}
+
 // ── Actor instances (runtime) ─────────────────────────────────────────────────
 //
 // A live actor. Created by `ActorType::construct`, dispatched against by
