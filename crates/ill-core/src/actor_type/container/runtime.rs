@@ -261,8 +261,6 @@ fn add_build_context(
         .add_custom_ignore_filename(".dockerignore")
         .build();
 
-    let dockerfile_canon = dockerfile.canonicalize().ok();
-
     for entry in walker {
         let entry = entry.map_err(|e| {
             RuntimeError::Construct(format!(
@@ -274,13 +272,16 @@ fn add_build_context(
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
-        if path.file_name().and_then(|n| n.to_str()) == Some(".dockerignore") {
+        // The Dockerfile is added separately by the caller and the
+        // `.dockerignore` controls the build but isn't itself a build input.
+        // The walker yields paths rooted at `context_dir`, and `dockerfile`
+        // came in as `context_dir.join(name)`, so direct `PathBuf` equality
+        // matches without per-entry `canonicalize` syscalls.
+        if path == dockerfile {
             continue;
         }
-        if let Some(df) = dockerfile_canon.as_deref() {
-            if path.canonicalize().ok().as_deref() == Some(df) {
-                continue;
-            }
+        if path.file_name().and_then(|n| n.to_str()) == Some(".dockerignore") {
+            continue;
         }
         let rel = path.strip_prefix(context_dir).map_err(|_| {
             RuntimeError::Construct(format!(

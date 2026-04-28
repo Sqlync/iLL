@@ -44,7 +44,14 @@ const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_KEEP_ALIVE_SECS: u64 = 60;
+/// Buffer between `AsyncClient` callers and the rumqttc event loop; sized
+/// well above any single command's request fan-out (subscribe / publish ≤ 1
+/// per call) so steady-state operation never blocks on send.
 const REQUEST_CHANNEL_CAP: usize = 10;
+/// Inbox buffer for incoming PUBLISH packets between event-loop and
+/// `receive_publish`. Tests with very fast-talking brokers and a
+/// slow-draining receiver could fill this; the publish_tx send then awaits.
+/// 64 is a deliberate compromise between memory and back-pressure latency.
 const INBOX_CAP: usize = 64;
 
 // Network atoms — share the set with `pg_client`.
@@ -120,13 +127,40 @@ pub struct Connected {
     /// shutdown); drained by `receive_disconnect`. Single-shot: once we've
     /// observed the disconnect, the event loop has already exited.
     disconnect_inbox: mpsc::Receiver<DisconnectPacket>,
-    /// Waiters for in-flight SUBACKs (FIFO; rumqttc preserves request order).
-    sub_waiters: WaiterQueue,
+    waiters: Waiters,
+}
+
+/// Three FIFO queues for in-flight broker round-trips, one per ack type.
+/// rumqttc preserves request order, so popping the front of the matching
+/// queue when an ack arrives wakes the right caller without tracking pkids.
+#[derive(Clone)]
+struct Waiters {
+    /// Waiters for in-flight SUBACKs.
+    sub: WaiterQueue,
     /// Waiters for in-flight QoS-1 PUBACKs.
-    qos1_waiters: WaiterQueue,
+    qos1: WaiterQueue,
     /// Waiters for in-flight QoS-2 PUBCOMPs (the QoS-2 handshake's terminal
     /// ack — rumqttc handles the PUBREC/PUBREL relay internally).
-    qos2_waiters: WaiterQueue,
+    qos2: WaiterQueue,
+}
+
+impl Waiters {
+    fn new() -> Self {
+        Self {
+            sub: new_waiter_queue(),
+            qos1: new_waiter_queue(),
+            qos2: new_waiter_queue(),
+        }
+    }
+
+    /// Resolve every pending waiter on every queue with the same error,
+    /// used when the connection drops and nothing further can ack.
+    fn fail_all_with(&self, factory: impl Fn() -> RunOutcome) {
+        let f: &dyn Fn() -> RunOutcome = &factory;
+        drain_waiters_with_error(&self.sub, f);
+        drain_waiters_with_error(&self.qos1, f);
+        drain_waiters_with_error(&self.qos2, f);
+    }
 }
 
 impl Drop for Connected {
@@ -154,7 +188,7 @@ fn pop_waiter(q: &WaiterQueue) -> Option<WaiterTx> {
     q.lock().unwrap().pop_front()
 }
 
-fn drain_waiters_with_error(q: &WaiterQueue, err_factory: impl Fn() -> RunOutcome) {
+fn drain_waiters_with_error(q: &WaiterQueue, err_factory: &dyn Fn() -> RunOutcome) {
     let drained: Vec<WaiterTx> = q.lock().unwrap().drain(..).collect();
     for w in drained {
         let _ = w.send(Err(err_factory()));
@@ -305,17 +339,13 @@ async fn attempt_connect(cfg: &ConnectConfig) -> Result<(Connected, RunOutcome),
 fn spawn_connected(client: AsyncClient, eventloop: EventLoop) -> Connected {
     let (publish_tx, publish_inbox) = mpsc::channel::<Publish>(INBOX_CAP);
     let (disconnect_tx, disconnect_inbox) = mpsc::channel::<DisconnectPacket>(1);
-    let sub_waiters = new_waiter_queue();
-    let qos1_waiters = new_waiter_queue();
-    let qos2_waiters = new_waiter_queue();
+    let waiters = Waiters::new();
 
     let event_loop_task = tokio::spawn(run_event_loop(
         eventloop,
         publish_tx,
         disconnect_tx,
-        sub_waiters.clone(),
-        qos1_waiters.clone(),
-        qos2_waiters.clone(),
+        waiters.clone(),
     ));
 
     Connected {
@@ -323,9 +353,7 @@ fn spawn_connected(client: AsyncClient, eventloop: EventLoop) -> Connected {
         event_loop_task,
         publish_inbox,
         disconnect_inbox,
-        sub_waiters,
-        qos1_waiters,
-        qos2_waiters,
+        waiters,
     }
 }
 
@@ -414,9 +442,7 @@ async fn run_event_loop(
     mut eventloop: EventLoop,
     publish_tx: mpsc::Sender<Publish>,
     disconnect_tx: mpsc::Sender<DisconnectPacket>,
-    sub_waiters: WaiterQueue,
-    qos1_waiters: WaiterQueue,
-    qos2_waiters: WaiterQueue,
+    waiters: Waiters,
 ) {
     loop {
         let event = match eventloop.poll().await {
@@ -440,10 +466,7 @@ async fn run_event_loop(
                     };
                     let _ = disconnect_tx.send(synth).await;
                 }
-                let factory = || network_error(NET_CONNECTION_LOST);
-                drain_waiters_with_error(&sub_waiters, factory);
-                drain_waiters_with_error(&qos1_waiters, factory);
-                drain_waiters_with_error(&qos2_waiters, factory);
+                waiters.fail_all_with(|| network_error(NET_CONNECTION_LOST));
                 return;
             }
         };
@@ -457,30 +480,26 @@ async fn run_event_loop(
             }
             Event::Incoming(Incoming::Disconnect(d)) => {
                 let _ = disconnect_tx.send(d).await;
-                let factory = || network_error(NET_CONNECTION_LOST);
-                drain_waiters_with_error(&sub_waiters, factory);
-                drain_waiters_with_error(&qos1_waiters, factory);
-                drain_waiters_with_error(&qos2_waiters, factory);
+                waiters.fail_all_with(|| network_error(NET_CONNECTION_LOST));
                 return;
             }
             Event::Incoming(Incoming::SubAck(sa)) => {
-                if let Some(w) = pop_waiter(&sub_waiters) {
+                if let Some(w) = pop_waiter(&waiters.sub) {
                     let _ = w.send(suback_outcome(&sa));
                 }
             }
             Event::Incoming(Incoming::PubAck(pa)) => {
-                if let Some(w) = pop_waiter(&qos1_waiters) {
+                if let Some(w) = pop_waiter(&waiters.qos1) {
                     let _ = w.send(puback_outcome(&pa));
                 }
             }
             Event::Incoming(Incoming::PubComp(pc)) => {
-                if let Some(w) = pop_waiter(&qos2_waiters) {
+                if let Some(w) = pop_waiter(&waiters.qos2) {
                     let _ = w.send(pubcomp_outcome(&pc));
                 }
             }
-            // ConnAck after construct (e.g. reconnect — not currently
-            // configured); PubRec / PubRel relayed internally by rumqttc;
-            // PingReq/PingResp; Subscribe/Unsubscribe (server-initiated, n/a).
+            // PubRec / PubRel are relayed internally by rumqttc as part of
+            // the QoS-2 handshake; PubComp is the only ack we observe.
             _ => {}
         }
     }
@@ -589,7 +608,7 @@ impl Connected {
             Err(()) => return mqtt_error("other", CLIENT_SIDE_REASON_CODE),
         };
 
-        let rx = push_waiter(&self.sub_waiters);
+        let rx = push_waiter(&self.waiters.sub);
         let send_result = if let Some(props) = user_props {
             let sub_props = SubscribeProperties {
                 id: None,
@@ -604,7 +623,7 @@ impl Connected {
         if let Err(_e) = send_result {
             // ClientError means the request channel is closed (event loop
             // exited). Pop our just-pushed waiter so it doesn't leak.
-            let _ = pop_waiter(&self.sub_waiters);
+            let _ = pop_waiter(&self.waiters.sub);
             return network_error(NET_CONNECTION_LOST);
         }
 
@@ -659,9 +678,9 @@ impl Connected {
         // QoS 1/2: register the appropriate waiter before sending so we can't
         // miss the ack even if it arrives before we await.
         let waiters = if qos == QoS::AtLeastOnce {
-            &self.qos1_waiters
+            &self.waiters.qos1
         } else {
-            &self.qos2_waiters
+            &self.waiters.qos2
         };
         let rx = push_waiter(waiters);
 
