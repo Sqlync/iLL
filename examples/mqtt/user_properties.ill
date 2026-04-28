@@ -34,7 +34,7 @@ as publisher:
       "client-type": "publisher"
 
   # publish_0 has no PUBACK, so user_properties are outgoing only — nothing on ok
-  publish_0 "events", "hello",
+  publish_0 "events", ~b`hello`,
     user_properties:
       "env": "prod"
       "version": "1"
@@ -56,6 +56,6 @@ as publisher:
   let assigned_id = ok.assigned_client_id
 
   subscribe_0 "status"
-  publish_0 "status", "connected as ${assigned_id}"
+  publish_0 "status", ~b`connected as ${assigned_id}`
   receive publish
-  assert ok.payload == "connected as ${assigned_id}"
+  assert ok.payload == ~b`connected as ${assigned_id}`

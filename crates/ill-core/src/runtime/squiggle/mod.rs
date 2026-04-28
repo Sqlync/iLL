@@ -14,11 +14,13 @@ use crate::ast::StringFragment;
 use super::eval::{eval, Scope};
 use super::{RuntimeError, Value};
 
+mod bytes;
 mod hex;
 mod json;
 mod re;
 mod sql;
 
+use bytes::Bytes;
 use hex::Hex;
 use json::Json;
 use re::Re;
@@ -58,6 +60,18 @@ pub fn concat_fragments(
                     Value::Number(n) => out.push_str(&n.to_string()),
                     Value::Bool(b) => out.push_str(&b.to_string()),
                     Value::Atom(a) => out.push_str(&a),
+                    // Bytes round-trip as text when valid UTF-8 — that's the
+                    // common case for payload captures from `~b` / text
+                    // publishes (`let last_msg = ok.payload`). Non-UTF-8
+                    // bytes fall through to the explicit error below.
+                    Value::Bytes(b) => match std::str::from_utf8(&b) {
+                        Ok(s) => out.push_str(s),
+                        Err(_) => {
+                            return Err(RuntimeError::Eval(
+                                "cannot interpolate non-UTF-8 bytes into string".into(),
+                            ))
+                        }
+                    },
                     other => {
                         return Err(RuntimeError::Eval(format!(
                             "cannot interpolate {} into string",
@@ -88,6 +102,7 @@ impl Registry {
         r.register(&Sql);
         r.register(&Json);
         r.register(&Hex);
+        r.register(&Bytes);
         r.register(&Re);
         r
     }

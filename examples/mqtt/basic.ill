@@ -37,21 +37,21 @@ as alice:
   subscribe_0 "greetings"
 
   # step 4: alice publish to that topic
-  publish_0 "greetings", "hello"
+  publish_0 "greetings", ~b`hello`
 
   # step 5: alice receives the publish
   receive publish
-  assert ok.payload == "hello"
+  assert ok.payload == ~b`hello`
   assert ok.topic == "greetings"
 
   # step 6: alice demonstrates capture and reuse
-  publish_0 "greetings", "world"
+  publish_0 "greetings", ~b`world`
   receive publish
   let last_msg = ok.payload
 
-  publish_0 "greetings", "got: ${last_msg}"
+  publish_0 "greetings", ~b`got: ${last_msg}`
   receive publish
-  assert ok.payload == "got: world"
+  assert ok.payload == ~b`got: world`
 
   # publish a binary payload using ~hex squiggle
   publish_0 "sensors/data", ~hex`DEADBEEF`
@@ -59,13 +59,13 @@ as alice:
   assert ok.payload == ~hex`DEADBEEF`
 
   # step 7: (error demonstration) alice publishes to an invalid topic
-  publish_0 "", "bad topic"
+  publish_0 "", ~b`bad topic`
   assert error.mqtt.reason == :invalid_topic
 
   # step 8: receive with an explicit timeout (default is 5 seconds)
-  publish_0 "greetings", "last message"
+  publish_0 "greetings", ~b`last message`
   receive publish, timeout: 2
-  assert ok.payload == "last message"
+  assert ok.payload == ~b`last message`
 
   # step 9: disconnect with reason code and user properties
   disconnect,
