@@ -62,8 +62,8 @@ fn is_truthy(v: &Value) -> bool {
 fn compare(left: &Value, right: &Value, op: ComparisonOp) -> Result<bool, RuntimeError> {
     use ComparisonOp::*;
     match op {
-        Eq => Ok(left == right),
-        NotEq => Ok(left != right),
+        Eq => Ok(values_eq(left, right)),
+        NotEq => Ok(!values_eq(left, right)),
         Gt => Ok(compare_ord(left, right)? == std::cmp::Ordering::Greater),
         Gte => Ok(compare_ord(left, right)? != std::cmp::Ordering::Less),
         Lt => Ok(compare_ord(left, right)? == std::cmp::Ordering::Less),
@@ -72,6 +72,21 @@ fn compare(left: &Value, right: &Value, op: ComparisonOp) -> Result<bool, Runtim
         NotContains => contains(left, right).map(|b| !b),
         Matches => matches_regex(left, right),
         NotMatches => matches_regex(left, right).map(|b| !b),
+    }
+}
+
+/// Equality with cross-type coercion for `String` vs `Bytes`. MQTT publish
+/// payloads come back as `Value::Bytes`; the natural way for users to write
+/// assertions on text payloads is `assert ok.payload == "hello"`. Treating
+/// the two as equal when the bytes are valid UTF-8 matching the string lets
+/// that pattern work without a separate `~b` literal. Non-UTF-8 bytes can
+/// only equal another `Bytes` value.
+fn values_eq(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::String(s), Value::Bytes(b)) | (Value::Bytes(b), Value::String(s)) => {
+            s.as_bytes() == b.as_slice()
+        }
+        _ => left == right,
     }
 }
 

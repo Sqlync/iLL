@@ -53,8 +53,9 @@ as alice:
   receive publish
   assert ok.payload == ~b`got: world`
 
-  # publish a binary payload using ~hex squiggle
-  publish_0 "sensors/data", ~hex`DEADBEEF`
+  # publish a binary payload using ~hex squiggle (same topic so the
+  # earlier "greetings" subscription matches and loops it back)
+  publish_0 "greetings", ~hex`DEADBEEF`
   receive publish
   assert ok.payload == ~hex`DEADBEEF`
 
