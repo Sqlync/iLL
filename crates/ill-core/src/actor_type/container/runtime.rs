@@ -215,21 +215,11 @@ async fn prepare_from_dockerfile(
     let tag = "latest".to_string();
     let name = synthesize_image_name(&resolved);
 
-    // The build context is the Dockerfile's parent directory, matching
-    // `docker build .` semantics so `COPY foo` finds a sibling `foo`. A
-    // `.dockerignore` next to the Dockerfile is honored using Docker's
-    // gitignore-style syntax — same engine `docker build` uses.
-    let context_dir = resolved.parent().ok_or_else(|| {
-        RuntimeError::Construct(format!(
-            "dockerfile has no parent directory: {}",
-            resolved.display()
-        ))
-    })?;
-
-    let mut builder = GenericBuildableImage::new(&name, &tag).with_dockerfile(&resolved);
-    builder = add_build_context(builder, context_dir, &resolved)?;
-
-    let _built = builder
+    // We discard the returned GenericImage — the tag now points to the
+    // built image on the local daemon and a fresh GenericImage::new at
+    // run time references the same.
+    let _built = GenericBuildableImage::new(&name, &tag)
+        .with_dockerfile(&resolved)
         .build_image()
         .await
         .map_err(|e| RuntimeError::Construct(format!("building `{}`: {e}", resolved.display())))?;
@@ -241,58 +231,6 @@ async fn prepare_from_dockerfile(
         mode: ContainerMode::default(),
         members,
     })
-}
-
-/// Walk `context_dir` and add every regular file to the build context, except
-/// the Dockerfile itself (already added separately) and the `.dockerignore`
-/// file (it controls the build but isn't a build input). Files matched by
-/// `.dockerignore` patterns are skipped.
-fn add_build_context(
-    mut builder: GenericBuildableImage,
-    context_dir: &Path,
-    dockerfile: &Path,
-) -> Result<GenericBuildableImage, RuntimeError> {
-    let walker = ignore::WalkBuilder::new(context_dir)
-        .git_ignore(false)
-        .git_exclude(false)
-        .git_global(false)
-        .ignore(false)
-        .parents(false)
-        .add_custom_ignore_filename(".dockerignore")
-        .build();
-
-    for entry in walker {
-        let entry = entry.map_err(|e| {
-            RuntimeError::Construct(format!(
-                "walking build context `{}`: {e}",
-                context_dir.display()
-            ))
-        })?;
-        let path = entry.path();
-        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-            continue;
-        }
-        // The Dockerfile is added separately by the caller and the
-        // `.dockerignore` controls the build but isn't itself a build input.
-        // The walker yields paths rooted at `context_dir`, and `dockerfile`
-        // came in as `context_dir.join(name)`, so direct `PathBuf` equality
-        // matches without per-entry `canonicalize` syscalls.
-        if path == dockerfile {
-            continue;
-        }
-        if path.file_name().and_then(|n| n.to_str()) == Some(".dockerignore") {
-            continue;
-        }
-        let rel = path.strip_prefix(context_dir).map_err(|_| {
-            RuntimeError::Construct(format!(
-                "build context entry `{}` is not under context dir `{}`",
-                path.display(),
-                context_dir.display()
-            ))
-        })?;
-        builder = builder.with_file(path.to_path_buf(), rel.to_string_lossy().into_owned());
-    }
-    Ok(builder)
 }
 
 /// Split `"name[:tag]"` into `(name, tag)` with `tag` defaulting to `"latest"`.
