@@ -26,17 +26,17 @@ as sender:
 
 # as blocks run sequentially; sender's message is buffered by the broker until echo_server receives it
 as sender:
-  publish_0 "echo/request", "hello"
+  publish_0 "echo/request", ~b`hello`
 
 # echo_server receives and reflects it back
 as echo_server:
   receive publish
   assert ok.topic == "echo/request"
   let msg = ok.payload
-  publish_0 "echo/response", "${msg}"
+  publish_0 "echo/response", ~b`${msg}`
 
 # sender receives the echo
 as sender:
   receive publish
   assert ok.topic == "echo/response"
-  assert ok.payload == "hello"
+  assert ok.payload == ~b`hello`

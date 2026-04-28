@@ -27,20 +27,20 @@ as publisher:
     port: broker.port
 
   # qos 0 — fire and forget, no ack
-  publish_0 "events/qos0", "at most once"
+  publish_0 "events/qos0", ~b`at most once`
 
   # qos 1 — broker acknowledges delivery (PUBACK)
-  publish_1 "events/qos1", "at least once"
+  publish_1 "events/qos1", ~b`at least once`
 
   # qos 2 — exactly-once delivery (PUBREC → PUBREL → PUBCOMP)
-  publish_2 "events/qos2", "exactly once"
+  publish_2 "events/qos2", ~b`exactly once`
 
 as subscriber:
   receive publish
-  assert ok.payload == "at most once"
+  assert ok.payload == ~b`at most once`
 
   receive publish
-  assert ok.payload == "at least once"
+  assert ok.payload == ~b`at least once`
 
   receive publish
-  assert ok.payload == "exactly once"
+  assert ok.payload == ~b`exactly once`
