@@ -26,7 +26,7 @@ use rumqttc::v5::mqttbytes::v5::{
 };
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, StateError,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -421,9 +421,25 @@ async fn run_event_loop(
     loop {
         let event = match eventloop.poll().await {
             Ok(e) => e,
-            Err(_) => {
-                // Network or protocol break post-connect. Close all in-flight
-                // waiters with `connection_lost` so callers don't hang.
+            Err(err) => {
+                // rumqttc surfaces incoming v5 DISCONNECT packets as
+                // `StateError::ServerDisconnect` rather than as a separate
+                // `Event::Incoming(Packet::Disconnect)`, so a broker
+                // disconnect (session takeover, server going away, etc.)
+                // arrives here. Synthesize the packet for the inbox so
+                // `receive_disconnect` returns the reason code instead of
+                // `connection_lost`.
+                if let ConnectionError::MqttState(StateError::ServerDisconnect {
+                    reason_code,
+                    ..
+                }) = &err
+                {
+                    let synth = DisconnectPacket {
+                        reason_code: *reason_code,
+                        properties: None,
+                    };
+                    let _ = disconnect_tx.send(synth).await;
+                }
                 let factory = || network_error(NET_CONNECTION_LOST);
                 drain_waiters_with_error(&sub_waiters, factory);
                 drain_waiters_with_error(&qos1_waiters, factory);

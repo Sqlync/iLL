@@ -44,7 +44,12 @@ as subscriber:
   assert ok.user_properties["env"] == "prod"
   assert ok.user_properties["version"] == "1"
 
-# user properties on CONNACK and broker-assigned client_id
+# broker-assigned client_id round-trip
+#
+# Clients that don't supply a `client_id` get one assigned by the broker;
+# `ok.assigned_client_id` exposes it. Some brokers also include a server
+# identification user_property on CONNACK (e.g. `server-version`), but that
+# isn't required by the v5 spec, so we don't assert on it here.
 as publisher:
   disconnect
 
@@ -52,7 +57,6 @@ as publisher:
   connect,
     host: "localhost"
     port: broker.port
-  assert ok.user_properties["server-version"] == "5.0"
   let assigned_id = ok.assigned_client_id
 
   subscribe_0 "status"
