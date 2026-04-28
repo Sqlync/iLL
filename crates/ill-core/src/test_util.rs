@@ -1,3 +1,11 @@
+use crate::ast::Span;
+
+/// A zero-length span, for tests that build AST nodes by hand and don't
+/// care about source positions.
+pub fn dummy_span() -> Span {
+    Span { start: 0, end: 0 }
+}
+
 /// Recursively collect all `.ill` files under `dir`.
 pub fn collect_ill_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     fn visit(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

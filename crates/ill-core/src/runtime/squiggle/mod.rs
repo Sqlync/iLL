@@ -120,11 +120,8 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, Ident, Span};
-
-    fn span() -> Span {
-        Span { start: 0, end: 0 }
-    }
+    use crate::ast::{Expr, Ident};
+    use crate::test_util::dummy_span;
 
     #[test]
     fn unknown_squiggle_lookup_is_none() {
@@ -137,7 +134,7 @@ mod tests {
         scope.bind("xs", Value::Array(vec![Value::Number(1)]));
         let frags = vec![StringFragment::Interpolation(Expr::Ident(Ident {
             name: "xs".into(),
-            span: span(),
+            span: dummy_span(),
         }))];
         assert!(concat_fragments(&frags, &scope).is_err());
     }

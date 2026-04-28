@@ -31,11 +31,8 @@ impl Squiggle for Bytes {
 mod tests {
     use super::super::Registry;
     use super::*;
-    use crate::ast::{Expr, Ident, Span};
-
-    fn span() -> Span {
-        Span { start: 0, end: 0 }
-    }
+    use crate::ast::{Expr, Ident};
+    use crate::test_util::dummy_span;
 
     #[test]
     fn registered() {
@@ -76,7 +73,7 @@ mod tests {
             StringFragment::Text("hello, ".into()),
             StringFragment::Interpolation(Expr::Ident(Ident {
                 name: "name".into(),
-                span: span(),
+                span: dummy_span(),
             })),
         ];
         let v = Bytes.eval(&frags, &scope).unwrap();
@@ -93,7 +90,7 @@ mod tests {
             StringFragment::Text("got: ".into()),
             StringFragment::Interpolation(Expr::Ident(Ident {
                 name: "captured".into(),
-                span: span(),
+                span: dummy_span(),
             })),
         ];
         let v = Bytes.eval(&frags, &scope).unwrap();
@@ -107,7 +104,7 @@ mod tests {
         scope.bind("binary", Value::Bytes(vec![0xFF, 0xFE]));
         let frags = vec![StringFragment::Interpolation(Expr::Ident(Ident {
             name: "binary".into(),
-            span: span(),
+            span: dummy_span(),
         }))];
         assert!(Bytes.eval(&frags, &scope).is_err());
     }

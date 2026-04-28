@@ -20,13 +20,10 @@ impl Squiggle for Sql {
 mod tests {
     use super::super::Registry;
     use super::*;
-    use crate::ast::{Expr, Ident, Span, StringFragment};
+    use crate::ast::{Expr, Ident, StringFragment};
     use crate::runtime::eval::Scope;
     use crate::runtime::Value;
-
-    fn span() -> Span {
-        Span { start: 0, end: 0 }
-    }
+    use crate::test_util::dummy_span;
 
     #[test]
     fn registered() {
@@ -51,7 +48,7 @@ mod tests {
             StringFragment::Text("x = ".into()),
             StringFragment::Interpolation(Expr::Ident(Ident {
                 name: "n".into(),
-                span: span(),
+                span: dummy_span(),
             })),
         ];
         assert_eq!(
