@@ -1,7 +1,14 @@
 # mqtt session takeover example
 #
-# when a new client connects with the same client_id as an existing client,
-# the broker sends DISCONNECT (reason_code 142) to the existing client
+# When a new client connects with the same client_id as an existing client,
+# the v5 spec recommends the broker send DISCONNECT(0x8E :session_taken_over)
+# to the displaced client. mosquitto and a few other brokers just close the
+# TCP connection instead — both are valid per spec ("SHOULD," not "MUST").
+# We exercise the second path here because it works against any v5 broker:
+# after client2 takes the session, any further command from client1 fails
+# with `error.network.reason == :connection_lost`. For brokers that do send
+# the DISCONNECT, swap the trailing publish for `receive disconnect` and
+# `assert ok.reason_code == 142`.
 
 actor broker = container,
   image: "eclipse-mosquitto"
@@ -28,7 +35,10 @@ as client2:
     port: broker.port
     client_id: "shared-id"
 
-# broker kicks client1 when client2 takes the session
+# Any command that needs a broker round-trip on client1 now fails —
+# `publish_0` is fire-and-forget so it can't observe the takeover, but
+# `subscribe_0` waits for a SUBACK that never arrives; the runtime surfaces
+# the dropped connection as `error.network`.
 as client1:
-  receive disconnect
-  assert ok.reason_code == 142
+  subscribe_0 "any/topic"
+  assert error.network.reason == :connection_lost

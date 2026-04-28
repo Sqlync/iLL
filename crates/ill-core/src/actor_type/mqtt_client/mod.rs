@@ -2,13 +2,16 @@
 
 pub mod commands;
 pub mod modes;
+pub mod runtime;
 
 use crate::ast::Expr;
+use crate::runtime::{ConstructArgs, RuntimeError};
 
-use super::{ActorType, Command, Mode};
+use super::{ActorInstance, ActorType, Command, Mode};
 
 pub struct MqttClient;
 
+#[async_trait::async_trait]
 impl ActorType for MqttClient {
     fn name(&self) -> &'static str {
         "mqtt_client"
@@ -59,6 +62,14 @@ impl ActorType for MqttClient {
             }
         }
         self.command(name).map(|c| (c, 0))
+    }
+
+    async fn construct(
+        &self,
+        args: &ConstructArgs,
+    ) -> Result<Box<dyn ActorInstance>, RuntimeError> {
+        let inst = runtime::MqttClientInstance::construct(args).await?;
+        Ok(Box::new(inst))
     }
 }
 

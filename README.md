@@ -26,7 +26,7 @@ Each `.ill` file is a single test. The following "actors" are currently targeted
 | exec | Shell command | [examples/exec/](examples/exec/) | ✅ |
 | pg_client | Postgres client | [examples/pg_client/](examples/pg_client/) | ✅ |
 | rest | REST client | [examples/rest/](examples/rest/) | ⬜ |
-| mqtt | MQTT client | [examples/mqtt/](examples/mqtt/) | ⬜ |
+| mqtt | MQTT 5 client | [examples/mqtt/](examples/mqtt/) | 🟡 |
 | container | Docker container | [examples/container/](examples/container/) | ✅ |
 | args | Command-line arguments | [examples/built-in/args.ill](examples/built-in/args.ill) | ✅ |
 

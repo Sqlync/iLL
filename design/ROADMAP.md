@@ -46,9 +46,9 @@ In any order
 - [ ] Actor member variables
   - [ ] visibility
   - [ ] mutability
-- [ ] Built-in actors (assert, env, etc.)
-- [ ] Container (image/dockerfile, run, lifecycle, shell)
-- [ ] Postgres (start/stop, client, queries)
+- [x] Built-in actors (assert, env, etc.)
+- [x] Container (image/dockerfile, run, lifecycle, shell)
+- [x] Postgres (start/stop, client, queries)
 - [ ] MQTT (broker, client, pub/sub)
 - [ ] REST (HTTP client)
 
@@ -66,6 +66,9 @@ Wire tree-sitter + validation into the language server for diagnostics, completi
 ## Deferred
 Cross-cutting concerns that apply to multiple actors or require broader design. Picked up when there's concrete need and clearer context.
 
+- [ ] make actor types, squiggles, and parsers more user extensible
+  - move the current implementations into a "ill-batteries" repo
+  - allow forking and extending or importing and then including your own implementations
 - [ ] reevaluate grammar around keyword args
   harness.rs was recently changed to parse kwargs slightly differently to accomodate envs in containers. but we might want to do
 ```

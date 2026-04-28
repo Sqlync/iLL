@@ -170,6 +170,11 @@ impl Command for Connect {
                 ty: ValueType::Unknown,
                 required: false,
             },
+            KeywordArgDef {
+                name: "timeout",
+                ty: ValueType::Number,
+                required: false,
+            },
         ]
     }
     fn ok_fields(&self) -> &'static [OutcomeField] {
