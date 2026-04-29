@@ -23,7 +23,7 @@ as alice:
     password: "root"
     port: db.port
     database: "test"
-    application_name: "ill-pg-client:basic"
+    application_name: "my-app"
 
   # create a table and insert some rows
   query ~sql`CREATE TABLE users (id INT, name TEXT)`
