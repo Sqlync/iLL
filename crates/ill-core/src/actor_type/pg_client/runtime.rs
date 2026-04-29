@@ -228,6 +228,10 @@ fn build_config(kw: &Dict) -> Result<(Config, Duration), ()> {
         _ => return Err(()),
     }
 
+    if let Some(Value::String(s)) = kw.get("application_name") {
+        cfg.application_name(s);
+    }
+
     let timeout = match kw.get("timeout") {
         Some(Value::Number(n)) if *n > 0 => Duration::from_millis(*n as u64),
         _ => DEFAULT_CONNECT_TIMEOUT,
@@ -508,6 +512,21 @@ mod tests {
         }
     }
 
+    fn connect_args_with_app_name(
+        port: u16,
+        user: &str,
+        password: &str,
+        database: &str,
+        application_name: &str,
+    ) -> CommandArgs {
+        let mut args = connect_args(port, user, password, database);
+        args.keyword.insert(
+            "application_name".into(),
+            Value::String(application_name.into()),
+        );
+        args
+    }
+
     fn query_args(sql: &str) -> CommandArgs {
         CommandArgs {
             positional: vec![Value::String(sql.into())],
@@ -622,6 +641,50 @@ mod tests {
             positional: Vec::new(),
             keyword: Dict::new(),
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires docker"]
+    async fn connect_with_application_name_reaches_postgres() {
+        let pg = start_pg().await;
+        let port = host_port(&pg).await;
+
+        let mut inst = PgClientInstance::construct(&empty_construct())
+            .await
+            .expect("construct");
+
+        let _ = expect_ok(
+            inst.execute(
+                "connect",
+                &connect_args_with_app_name(port, PG_USER, PG_PASSWORD, PG_DB, "ill-test"),
+            )
+            .await,
+        );
+
+        let ok = expect_ok(
+            inst.execute(
+                "query",
+                &query_args(
+                    "SELECT application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()",
+                ),
+            )
+            .await,
+        );
+        match ok.get("row") {
+            Some(Value::Array(rows)) => {
+                assert_eq!(rows.len(), 1);
+                match &rows[0] {
+                    Value::Array(cells) => {
+                        assert_eq!(cells[0], Value::String("ill-test".into()));
+                    }
+                    other => panic!("row[0] not an array: {other:?}"),
+                }
+            }
+            other => panic!("ok.row not an array: {other:?}"),
+        }
+
+        let td = inst.teardown().await;
+        assert!(td.ok, "teardown failed: {:?}", td.message);
     }
 
     #[tokio::test]
