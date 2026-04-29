@@ -4,7 +4,9 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
+use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use ill_core::diagnostic::Severity;
+use ill_core::render;
 use ill_core::runtime::report::{StatementReport, TestReport};
 
 const ILL_EXTENSION: &str = "ill";
@@ -132,7 +134,7 @@ async fn run_test(paths: &[PathBuf]) {
             println!("PASS {}", path.display());
             passed += 1;
         } else {
-            print_failed_report(&report);
+            print_failed_report(&report, &src);
             failed += 1;
         }
     }
@@ -144,19 +146,13 @@ async fn run_test(paths: &[PathBuf]) {
     }
 }
 
-fn print_failed_report(report: &TestReport) {
+fn print_failed_report(report: &TestReport, source: &str) {
     eprintln!("FAIL {}", report.path.display());
+    let mut stderr = StandardStream::stderr(ColorChoice::Auto);
     for s in &report.statements {
         match s {
-            StatementReport::ParseFailure(msgs) => {
-                for m in msgs {
-                    eprintln!("  parse error: {m}");
-                }
-            }
-            StatementReport::ValidationFailure(diags) => {
-                for d in diags {
-                    eprintln!("  {d}");
-                }
+            StatementReport::ParseFailure(diags) | StatementReport::ValidationFailure(diags) => {
+                let _ = render::render(&report.path, source, diags, &mut stderr);
             }
             StatementReport::ConstructFailure {
                 actor,
@@ -259,11 +255,12 @@ fn run_check(paths: &[PathBuf]) {
             }
         };
 
+        let mut stderr = StandardStream::stderr(ColorChoice::Auto);
         match ill_core::lower::lower(&src) {
             Ok(ast) => {
                 let diags = ill_core::validate::validate(&ast);
+                let _ = render::render(path, &src, &diags, &mut stderr);
                 for d in &diags {
-                    eprintln!("{}: {d}", path.display());
                     match d.severity {
                         Severity::Error => error_count += 1,
                         Severity::Warning => warning_count += 1,
@@ -273,9 +270,7 @@ fn run_check(paths: &[PathBuf]) {
                 }
             }
             Err(errors) => {
-                for e in &errors {
-                    eprintln!("{}: {e}", path.display());
-                }
+                let _ = render::render(path, &src, &errors, &mut stderr);
                 error_count += errors.len();
             }
         }

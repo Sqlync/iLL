@@ -5,72 +5,7 @@
 // problem so we can report multiple issues at once.
 
 use crate::ast::*;
-
-// ── Errors ─────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub enum LowerError {
-    UnexpectedNode {
-        kind: String,
-        span: Span,
-    },
-    MissingField {
-        parent: String,
-        field: String,
-        span: Span,
-    },
-    InvalidLiteral {
-        text: String,
-        span: Span,
-    },
-    InvalidEscape {
-        message: String,
-        span: Span,
-    },
-    TreeSitterError {
-        span: Span,
-    },
-}
-
-impl std::fmt::Display for LowerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LowerError::UnexpectedNode { kind, span } => {
-                write!(
-                    f,
-                    "unexpected node `{}` at {}..{}",
-                    kind, span.start, span.end
-                )
-            }
-            LowerError::MissingField {
-                parent,
-                field,
-                span,
-            } => {
-                write!(
-                    f,
-                    "missing field `{}` on `{}` at {}..{}",
-                    field, parent, span.start, span.end
-                )
-            }
-            LowerError::InvalidLiteral { text, span } => {
-                write!(
-                    f,
-                    "invalid literal `{}` at {}..{}",
-                    text, span.start, span.end
-                )
-            }
-            LowerError::InvalidEscape { message, span } => {
-                write!(f, "{} at {}..{}", message, span.start, span.end)
-            }
-            LowerError::TreeSitterError { span } => {
-                write!(f, "parse error at {}..{}", span.start, span.end)
-            }
-        }
-    }
-}
-
-impl std::error::Error for LowerError {}
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 
 /// Process backslash escape sequences in a double-quoted string fragment.
 /// Squiggles and single-quoted strings are raw and skip this pass.
@@ -131,7 +66,7 @@ pub fn normalize(src: &str) -> String {
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
-pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
+pub fn lower(source: &str) -> Result<SourceFile, Vec<Diagnostic>> {
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_ill::LANGUAGE.into())
@@ -164,7 +99,7 @@ pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
 
 struct LowerCtx<'a> {
     source: &'a str,
-    errors: Vec<LowerError>,
+    errors: Vec<Diagnostic>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -180,15 +115,64 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn collect_errors(&mut self, node: tree_sitter::Node) {
-        if node.is_error() || node.is_missing() {
-            self.errors.push(LowerError::TreeSitterError {
-                span: self.span(node),
-            });
+        if node.is_missing() {
+            // MISSING nodes are tree-sitter's recovery hint for "expected X here
+            // but didn't see it". `node.kind()` carries the expected token type.
+            let kind = node.kind();
+            let msg = if kind.is_empty() {
+                "missing token here".to_string()
+            } else {
+                format!("missing `{kind}` here")
+            };
+            self.errors.push(Diagnostic::error(
+                self.span(node),
+                DiagnosticCode::MissingToken,
+                msg,
+            ));
+            // MISSING nodes don't have meaningful children; stop descending.
+            return;
         }
+
+        if node.is_error() {
+            // ERROR nodes wrap whatever the parser couldn't make sense of.
+            // We emit one diagnostic per ERROR and don't walk into it — its
+            // children are byproducts of recovery, not real errors the user
+            // should see.
+            self.errors.push(self.error_diagnostic(node));
+            return;
+        }
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.collect_errors(child);
         }
+    }
+
+    /// Build a diagnostic for an ERROR node. Looks at the surrounding context
+    /// to produce something more useful than "parse error at 676..702".
+    fn error_diagnostic(&self, node: tree_sitter::Node) -> Diagnostic {
+        let span = self.span(node);
+        let snippet = self.text(node);
+        let trimmed = snippet.trim();
+        let preview: String = trimmed.chars().take(40).collect();
+        let preview_suffix = if trimmed.chars().count() > 40 { "…" } else { "" };
+
+        let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+
+        let message = if trimmed.is_empty() {
+            match parent_kind {
+                "" | "source_file" => "unexpected input here".to_string(),
+                kind => format!("unexpected input inside `{kind}`"),
+            }
+        } else {
+            format!("unexpected `{preview}{preview_suffix}`")
+        };
+
+        let mut diag = Diagnostic::error(span, DiagnosticCode::ParseError, message);
+        if !parent_kind.is_empty() && parent_kind != "source_file" {
+            diag = diag.with_note(format!("while parsing a `{parent_kind}`"));
+        }
+        diag
     }
 
     // ── Source file ────────────────────────────────────────────────────────
@@ -209,11 +193,17 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 "NEWLINE" | "comment" => {}
+                // ERROR/MISSING were already reported by collect_errors; don't
+                // double-flag them here as "unexpected node".
+                k if child.is_error() || child.is_missing() => {
+                    let _ = k;
+                }
                 _ => {
-                    self.errors.push(LowerError::UnexpectedNode {
-                        kind: child.kind().to_string(),
-                        span: self.span(child),
-                    });
+                    self.errors.push(Diagnostic::error(
+                        self.span(child),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("unexpected `{}` at top level", child.kind()),
+                    ));
                 }
             }
         }
@@ -413,11 +403,15 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 "INDENT" | "DEDENT" | "NEWLINE" | "comment" => {}
+                k if child.is_error() || child.is_missing() => {
+                    let _ = k;
+                }
                 _ => {
-                    self.errors.push(LowerError::UnexpectedNode {
-                        kind: child.kind().to_string(),
-                        span: self.span(child),
-                    });
+                    self.errors.push(Diagnostic::error(
+                        self.span(child),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("unexpected `{}` inside `as` block", child.kind()),
+                    ));
                 }
             }
         }
@@ -557,10 +551,11 @@ impl<'a> LowerCtx<'a> {
             "matches" => ComparisonOp::Matches,
             "!matches" => ComparisonOp::NotMatches,
             _ => {
-                self.errors.push(LowerError::InvalidLiteral {
-                    text: text.to_string(),
-                    span: self.span(node),
-                });
+                self.errors.push(Diagnostic::error(
+                    self.span(node),
+                    DiagnosticCode::InvalidLiteral,
+                    format!("`{text}` is not a valid comparison operator"),
+                ));
                 return None;
             }
         };
@@ -623,10 +618,13 @@ impl<'a> LowerCtx<'a> {
                 self.lower_primary(node)
             }
             _ => {
-                self.errors.push(LowerError::UnexpectedNode {
-                    kind: node.kind().to_string(),
-                    span: self.span(node),
-                });
+                if !node.is_error() && !node.is_missing() {
+                    self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("expected an expression, found `{}`", node.kind()),
+                    ));
+                }
                 None
             }
         }
@@ -640,10 +638,11 @@ impl<'a> LowerCtx<'a> {
                 match text.parse::<i64>() {
                     Ok(n) => Some(Expr::Number(n)),
                     Err(_) => {
-                        self.errors.push(LowerError::InvalidLiteral {
-                            text: text.to_string(),
-                            span: self.span(node),
-                        });
+                        self.errors.push(Diagnostic::error(
+                            self.span(node),
+                            DiagnosticCode::InvalidLiteral,
+                            format!("`{text}` is not a valid integer"),
+                        ));
                         None
                     }
                 }
@@ -660,10 +659,13 @@ impl<'a> LowerCtx<'a> {
             "squiggle" => self.lower_squiggle(node),
             "array" => self.lower_array(node),
             _ => {
-                self.errors.push(LowerError::UnexpectedNode {
-                    kind: node.kind().to_string(),
-                    span: self.span(node),
-                });
+                if !node.is_error() && !node.is_missing() {
+                    self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("expected a value, found `{}`", node.kind()),
+                    ));
+                }
                 None
             }
         }
@@ -748,10 +750,11 @@ impl<'a> LowerCtx<'a> {
             if let StringFragment::Text(t) = frag {
                 match unescape(t) {
                     Ok(s) => *t = s,
-                    Err(message) => self.errors.push(LowerError::InvalidEscape {
+                    Err(message) => self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::InvalidEscape,
                         message,
-                        span: self.span(node),
-                    }),
+                    )),
                 }
             }
         }
@@ -805,11 +808,11 @@ impl<'a> LowerCtx<'a> {
 
     fn lower_ident_field(&mut self, node: tree_sitter::Node, field: &str) -> Option<Ident> {
         let child = node.child_by_field_name(field).or_else(|| {
-            self.errors.push(LowerError::MissingField {
-                parent: node.kind().to_string(),
-                field: field.to_string(),
-                span: self.span(node),
-            });
+            self.errors.push(Diagnostic::error(
+                self.span(node),
+                DiagnosticCode::MissingField,
+                format!("`{}` is missing required `{field}`", node.kind()),
+            ));
             None
         })?;
         Some(self.ident_from_node(child))

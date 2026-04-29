@@ -1,5 +1,6 @@
-// Diagnostics produced by the validator. Shaped so Phase 6's LSP can consume
-// them directly without reshaping.
+// Diagnostics produced by lowering and validation. Shaped so Phase 6's LSP can
+// consume them directly without reshaping. Both the parser (lower.rs) and the
+// validator emit `Diagnostic` so the CLI renderer has a single input type.
 
 use std::fmt;
 
@@ -17,6 +18,14 @@ pub enum Severity {
 /// tests to assert on specific errors without matching on message strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
+    // Parse / lower errors
+    ParseError,
+    MissingToken,
+    UnexpectedNode,
+    MissingField,
+    InvalidLiteral,
+    InvalidEscape,
+
     // Name resolution
     UnknownActorType,
     UnknownActor,
@@ -42,6 +51,9 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub code: DiagnosticCode,
     pub message: String,
+    /// Footer notes shown below the source snippet — hints, suggestions, related
+    /// info. Renderers display each on its own line.
+    pub notes: Vec<String>,
 }
 
 impl Diagnostic {
@@ -51,7 +63,13 @@ impl Diagnostic {
             severity: Severity::Error,
             code,
             message: message.into(),
+            notes: Vec::new(),
         }
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
     }
 }
 

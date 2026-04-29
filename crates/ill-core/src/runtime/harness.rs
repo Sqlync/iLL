@@ -34,11 +34,10 @@ pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
     let ast = match crate::lower::lower(src) {
         Ok(a) => a,
         Err(errors) => {
-            let messages = errors.iter().map(|e| e.to_string()).collect();
             return TestReport {
                 path: path.to_path_buf(),
                 passed: false,
-                statements: vec![StatementReport::ParseFailure(messages)],
+                statements: vec![StatementReport::ParseFailure(errors)],
                 teardown: Vec::new(),
             };
         }
