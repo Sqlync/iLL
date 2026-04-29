@@ -22,12 +22,42 @@ use crate::registry::Registry;
 use crate::runtime::squiggle::Registry as SquiggleRegistry;
 
 /// Per-actor state threaded through the symbolic walk.
-struct ActorState {
+struct HealthyActor {
     type_def: &'static dyn ActorType,
     mode: &'static dyn Mode,
     /// Types of declared vars + `let` bindings introduced inside this actor's
     /// `as` blocks.
     vars: HashMap<String, ValueType>,
+}
+
+/// A declared actor's symbol-table entry. `Errored` is the "poison" variant:
+/// the name was declared but the binding is unusable (unknown type, etc.).
+/// Lookups that hit `Errored` short-circuit silently — the original error was
+/// already reported at the declaration site, and re-reporting at use sites
+/// would just be noise.
+enum ActorState {
+    Healthy(HealthyActor),
+    Errored,
+}
+
+impl ActorState {
+    fn is_errored(&self) -> bool {
+        matches!(self, ActorState::Errored)
+    }
+
+    fn as_healthy(&self) -> Option<&HealthyActor> {
+        match self {
+            ActorState::Healthy(h) => Some(h),
+            ActorState::Errored => None,
+        }
+    }
+
+    fn as_healthy_mut(&mut self) -> Option<&mut HealthyActor> {
+        match self {
+            ActorState::Healthy(h) => Some(h),
+            ActorState::Errored => None,
+        }
+    }
 }
 
 /// Outcome state for the command currently being processed in an `as` block.
@@ -83,13 +113,19 @@ impl<'r> Validator<'r> {
     // ── Actor declarations ────────────────────────────────────────────────────
 
     fn register_actor(&mut self, decl: &ast::ActorDeclaration) {
-        if self.actors.contains_key(&decl.name.name) {
-            self.diagnostics.push(Diagnostic::error(
-                decl.name.span,
-                DiagnosticCode::DuplicateActor,
-                format!("actor `{}` is already declared", decl.name.name),
-            ));
-            return;
+        // A healthy prior declaration is a duplicate. An errored prior entry
+        // is shadowable — the user is presumably correcting a typo, and the
+        // healthy declaration should win at use sites rather than being
+        // silenced by a "duplicate" against a poisoned ghost.
+        if let Some(existing) = self.actors.get(&decl.name.name) {
+            if !existing.is_errored() {
+                self.diagnostics.push(Diagnostic::error(
+                    decl.name.span,
+                    DiagnosticCode::DuplicateActor,
+                    format!("actor `{}` is already declared", decl.name.name),
+                ));
+                return;
+            }
         }
 
         let Some(type_def) = self.registry.get(&decl.actor_type.name) else {
@@ -98,6 +134,9 @@ impl<'r> Validator<'r> {
                 DiagnosticCode::UnknownActorType,
                 format!("unknown actor type `{}`", decl.actor_type.name),
             ));
+            // Insert poison so later `as <name>:` blocks suppress UnknownActor.
+            self.actors
+                .insert(decl.name.name.clone(), ActorState::Errored);
             return;
         };
 
@@ -130,24 +169,30 @@ impl<'r> Validator<'r> {
 
         self.actors.insert(
             decl.name.name.clone(),
-            ActorState {
+            ActorState::Healthy(HealthyActor {
                 type_def,
                 mode: type_def.initial_mode(),
                 vars,
-            },
+            }),
         );
     }
 
     // ── `as` blocks ───────────────────────────────────────────────────────────
 
     fn check_as_block(&mut self, block: &AsBlock) {
-        if !self.actors.contains_key(&block.actor.name) {
-            self.diagnostics.push(Diagnostic::error(
-                block.actor.span,
-                DiagnosticCode::UnknownActor,
-                format!("unknown actor `{}`", block.actor.name),
-            ));
-            return;
+        match self.actors.get(&block.actor.name) {
+            None => {
+                self.diagnostics.push(Diagnostic::error(
+                    block.actor.span,
+                    DiagnosticCode::UnknownActor,
+                    format!("unknown actor `{}`", block.actor.name),
+                ));
+                return;
+            }
+            // Poison short-circuit: the declaration already errored. Anything
+            // we'd report inside this block is downstream of that one error.
+            Some(state) if state.is_errored() => return,
+            Some(_) => {}
         }
 
         // Schemas for `ok.*` / `error.*` after the last command.
@@ -171,7 +216,11 @@ impl<'r> Validator<'r> {
                     // but only if that command's outcome was ok.
                     if outcome.is_ok() {
                         if let Some(next_mode) = pending_transition {
-                            if let Some(state) = self.actors.get_mut(&block.actor.name) {
+                            if let Some(state) = self
+                                .actors
+                                .get_mut(&block.actor.name)
+                                .and_then(ActorState::as_healthy_mut)
+                            {
                                 state.mode = next_mode;
                             }
                         }
@@ -221,7 +270,11 @@ impl<'r> Validator<'r> {
                             }
                         }
                     };
-                    if let Some(state) = self.actors.get_mut(&block.actor.name) {
+                    if let Some(state) = self
+                        .actors
+                        .get_mut(&block.actor.name)
+                        .and_then(ActorState::as_healthy_mut)
+                    {
                         state.vars.insert(let_stmt.name.name.clone(), ty);
                     }
                 }
@@ -252,7 +305,11 @@ impl<'r> Validator<'r> {
         // Apply the pending transition for the final command in the block.
         if outcome.is_ok() {
             if let Some(next_mode) = pending_transition {
-                if let Some(state) = self.actors.get_mut(&block.actor.name) {
+                if let Some(state) = self
+                    .actors
+                    .get_mut(&block.actor.name)
+                    .and_then(ActorState::as_healthy_mut)
+                {
                     state.mode = next_mode;
                 }
             }
@@ -273,7 +330,9 @@ impl<'r> Validator<'r> {
         &'static [ErrorTypeDef],
         Option<&'static dyn Mode>,
     ) {
-        let Some(state) = self.actors.get(actor_name) else {
+        // Errored actors return empty here — the declaration already errored,
+        // so any command-shape issues would be derivative noise.
+        let Some(state) = self.actors.get(actor_name).and_then(ActorState::as_healthy) else {
             return (&[], &[], None);
         };
         let type_def = state.type_def;
@@ -449,7 +508,9 @@ impl<'r> Validator<'r> {
                 // None for non-ok/error roots → Unknown.
                 if let Expr::Ident(root) = object.as_ref() {
                     if root.name == "self" {
-                        if let Some(state) = self.actors.get(actor_name) {
+                        if let Some(state) =
+                            self.actors.get(actor_name).and_then(ActorState::as_healthy)
+                        {
                             if let Some(ty) = state.vars.get(&property.name) {
                                 return *ty;
                             }
@@ -461,7 +522,7 @@ impl<'r> Validator<'r> {
                     .unwrap_or(ValueType::Unknown)
             }
             Expr::Ident(ident) => {
-                if let Some(state) = self.actors.get(actor_name) {
+                if let Some(state) = self.actors.get(actor_name).and_then(ActorState::as_healthy) {
                     if let Some(ty) = state.vars.get(&ident.name) {
                         return *ty;
                     }
@@ -673,6 +734,63 @@ as bob:
     database: \"d\"
 ";
         assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownActor]);
+    }
+
+    /// Use sites of an actor whose declaration failed must NOT re-fire derivative
+    /// errors. Only the root cause (UnknownActorType) is reported.
+    #[test]
+    fn unknown_actor_type_suppresses_use_site_errors() {
+        let src = "\
+actor alice = nope_actor
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownActorType]);
+    }
+
+    /// A poisoned actor's `as` block also suppresses inner command/mode errors —
+    /// they're all downstream of the same root cause.
+    #[test]
+    fn poisoned_actor_suppresses_inner_command_errors() {
+        let src = "\
+actor alice = nope_actor
+as alice:
+  totally_made_up_command
+";
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::UnknownActorType]);
+    }
+
+    /// Healthy actors alongside a poisoned one still validate normally — poison
+    /// is per-binding, not file-wide.
+    #[test]
+    fn poison_does_not_leak_to_healthy_actors() {
+        let src = "\
+actor alice = nope_actor
+actor bob = pg_client
+as bob:
+  nope_command
+";
+        assert_eq!(
+            codes(&diags(src)),
+            vec![DiagnosticCode::UnknownActorType, DiagnosticCode::UnknownCommand]
+        );
+    }
+
+    /// A duplicate-after-healthy still flags the duplicate, and use sites still
+    /// validate against the original healthy declaration.
+    #[test]
+    fn duplicate_after_healthy_does_not_silence_use_sites() {
+        let src = "\
+actor alice = pg_client
+actor alice = pg_client
+as alice:
+  connect,
+    user: \"u\"
+    database: \"d\"
+";
+        assert_eq!(codes(&diags(src)), vec![DiagnosticCode::DuplicateActor]);
     }
 
     #[test]
