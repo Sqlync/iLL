@@ -6,9 +6,17 @@ use std::path::Path;
 
 use codespan_reporting::diagnostic::{Diagnostic as CsrDiagnostic, Label};
 use codespan_reporting::files::SimpleFile;
-use codespan_reporting::term::{self, termcolor::WriteColor, Config};
+use codespan_reporting::term::termcolor::{ColorChoice, StandardStream, WriteColor};
+use codespan_reporting::term::{self, Config};
 
 use crate::diagnostic::{Diagnostic, Severity};
+
+/// Build a color-aware stderr writer suitable for [`render`]. Centralised here
+/// so callers (CLI, future LSP CLI mode, etc.) don't need a direct termcolor
+/// dependency.
+pub fn stderr_writer() -> StandardStream {
+    StandardStream::stderr(ColorChoice::Auto)
+}
 
 /// Render a batch of diagnostics for a single source file. The path is used for
 /// the snippet header; the source string is needed to resolve byte offsets to

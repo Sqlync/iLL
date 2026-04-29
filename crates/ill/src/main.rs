@@ -4,8 +4,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
-use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-use ill_core::diagnostic::Severity;
+use ill_core::diagnostic::{Diagnostic, Severity};
 use ill_core::render;
 use ill_core::runtime::report::{StatementReport, TestReport};
 
@@ -146,13 +145,25 @@ async fn run_test(paths: &[PathBuf]) {
     }
 }
 
+/// Render diagnostics with a plain-text fallback if the rich renderer fails
+/// (e.g. EPIPE on stderr). Better to lose color than to silently drop the
+/// diagnostic body.
+fn render_or_fallback(path: &Path, source: &str, diags: &[Diagnostic]) {
+    let mut stderr = render::stderr_writer();
+    if let Err(e) = render::render(path, source, diags, &mut stderr) {
+        eprintln!("ill: failed to render diagnostics: {e}");
+        for d in diags {
+            eprintln!("  {d}");
+        }
+    }
+}
+
 fn print_failed_report(report: &TestReport, source: &str) {
     eprintln!("FAIL {}", report.path.display());
-    let mut stderr = StandardStream::stderr(ColorChoice::Auto);
     for s in &report.statements {
         match s {
             StatementReport::ParseFailure(diags) | StatementReport::ValidationFailure(diags) => {
-                let _ = render::render(&report.path, source, diags, &mut stderr);
+                render_or_fallback(&report.path, source, diags);
             }
             StatementReport::ConstructFailure {
                 actor,
@@ -244,7 +255,6 @@ fn run_check(paths: &[PathBuf]) {
     let mut warning_count = 0;
     let mut info_count = 0;
     let mut hint_count = 0;
-    let mut stderr = StandardStream::stderr(ColorChoice::Auto);
 
     for path in &files {
         let src = match std::fs::read_to_string(path) {
@@ -259,7 +269,7 @@ fn run_check(paths: &[PathBuf]) {
         match ill_core::lower::lower(&src) {
             Ok(ast) => {
                 let diags = ill_core::validate::validate(&ast);
-                let _ = render::render(path, &src, &diags, &mut stderr);
+                render_or_fallback(path, &src, &diags);
                 for d in &diags {
                     match d.severity {
                         Severity::Error => error_count += 1,
@@ -270,7 +280,7 @@ fn run_check(paths: &[PathBuf]) {
                 }
             }
             Err(errors) => {
-                let _ = render::render(path, &src, &errors, &mut stderr);
+                render_or_fallback(path, &src, &errors);
                 error_count += errors.len();
             }
         }

@@ -154,8 +154,9 @@ impl<'a> LowerCtx<'a> {
         let span = self.span(node);
         let snippet = self.text(node);
         let trimmed = snippet.trim();
-        let preview: String = trimmed.chars().take(40).collect();
-        let preview_suffix = if trimmed.chars().count() > 40 { "…" } else { "" };
+        let mut chars = trimmed.chars();
+        let preview: String = chars.by_ref().take(40).collect();
+        let preview_suffix = if chars.next().is_some() { "…" } else { "" };
 
         let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
 

@@ -12,5 +12,4 @@ path = "src/main.rs"
 [dependencies]
 ill-core = { path = "../ill-core" }
 clap = { version = "4", features = ["derive"] }
-codespan-reporting = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
