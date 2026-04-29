@@ -979,6 +979,61 @@ actor args = args_actor,
         }
     }
 
+    // ── Negative numbers ────────────────────────────────────────────────────
+
+    #[test]
+    fn lower_negative_number_in_array() {
+        let source = "\
+actor db = container
+as db:
+  assert ok.row[1] == [\"root\", -4, \"root\", \"0000000000\"]
+";
+        let file = lower(source).expect("negative numbers in arrays should lower cleanly");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+        let assert_stmt = match &as_block.body[0] {
+            Statement::Assert(a) => a,
+            _ => panic!("expected assert statement"),
+        };
+        let array = match assert_stmt.right.as_ref() {
+            Some(Expr::Array(elems)) => elems,
+            other => panic!("expected array on rhs, got {other:?}"),
+        };
+        assert!(matches!(array[1], Expr::Number(-4)), "expected -4, got {:?}", array[1]);
+    }
+
+    #[test]
+    fn lower_negative_number_standalone() {
+        let source = "\
+actor db = container
+as db:
+  assert ok.code == -1
+";
+        let file = lower(source).expect("standalone negative number should lower cleanly");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+        let assert_stmt = match &as_block.body[0] {
+            Statement::Assert(a) => a,
+            _ => panic!("expected assert statement"),
+        };
+        match assert_stmt.right.as_ref() {
+            Some(Expr::Number(-1)) => {}
+            other => panic!("expected -1, got {other:?}"),
+        }
+    }
+
     // ── Corpus smoke test ───────────────────────────────────────────────────
 
     /// Every `.ill` file under examples/ must parse cleanly and lower to an

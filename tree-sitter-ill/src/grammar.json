@@ -1343,7 +1343,7 @@
     },
     "number": {
       "type": "PATTERN",
-      "value": "\\d+"
+      "value": "-?\\d+"
     },
     "boolean": {
       "type": "CHOICE",

@@ -271,7 +271,7 @@ module.exports = grammar({
     squiggle_content: (_) => token.immediate(prec(1, /[^`\\$]+|\\.|[$]/)),
 
     // ─── Primitives ────────────────────────────────────────────────────
-    number: (_) => /\d+/,
+    number: (_) => /-?\d+/,
 
     boolean: (_) => choice("true", "false"),
 
