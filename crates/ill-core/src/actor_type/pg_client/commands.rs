@@ -121,6 +121,11 @@ impl Command for Connect {
                 required: true,
             },
             KeywordArgDef {
+                name: "application_name",
+                ty: ValueType::String,
+                required: false,
+            },
+            KeywordArgDef {
                 name: "timeout",
                 ty: ValueType::Number,
                 required: false,
