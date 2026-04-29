@@ -3,7 +3,7 @@ source: crates/ill-core/src/render.rs
 assertion_line: 106
 expression: "render_to_string(\"demo.ill\", source, &[diag])"
 ---
-error[E0002]: missing `=` here
+error: missing `=` here
   ┌─ demo.ill:1:6
   │
 1 │ actor a = container

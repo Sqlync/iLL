@@ -54,7 +54,6 @@ fn to_csr(d: &Diagnostic) -> CsrDiagnostic<()> {
 
     CsrDiagnostic::new(severity)
         .with_message(&d.message)
-        .with_code(d.code.as_str())
         .with_labels(vec![Label::primary((), range)])
         .with_notes(d.notes.clone())
 }

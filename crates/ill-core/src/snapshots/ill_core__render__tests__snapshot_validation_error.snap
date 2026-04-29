@@ -3,7 +3,7 @@ source: crates/ill-core/src/render.rs
 assertion_line: 93
 expression: "render_to_string(\"demo.ill\", source, &[diag])"
 ---
-error[E0101]: unknown actor type `unknownthing`
+error: unknown actor type `unknownthing`
   ┌─ demo.ill:1:13
   │
 1 │ actor bob = unknownthing
