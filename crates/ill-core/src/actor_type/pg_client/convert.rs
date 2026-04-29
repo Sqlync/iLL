@@ -67,7 +67,7 @@ fn cell_to_value(row: &Row, i: usize) -> Value {
             .try_get::<_, Option<i8>>(i)
             .ok()
             .flatten()
-            .map(|n| Value::Number(n as i64))
+            .map(|n| Value::String((n as u8 as char).to_string()))
             .unwrap_or(Value::Null),
         Type::INT2 => row
             .try_get::<_, Option<i16>>(i)
