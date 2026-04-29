@@ -151,7 +151,6 @@ fn one_bad_file_blocks_the_clean_ones() {
         "stderr: {}",
         r.stderr
     );
-    // The clean file must not have run — no PASS line, no run summary.
     assert!(
         !r.stdout.contains("PASS"),
         "good file ran despite gate failure; stdout: {}",

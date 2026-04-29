@@ -161,9 +161,6 @@ async fn run_test(paths: &[PathBuf]) {
     let mut failed = 0;
 
     for f in &clean {
-        // `clean` came from a successful `check_files` walk that produced no
-        // errors; an `ast = None` would only happen on parse failure, which
-        // always emits errors and lands the file in `failing`.
         let ast = f
             .ast
             .as_ref()
