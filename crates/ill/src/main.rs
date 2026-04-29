@@ -125,15 +125,9 @@ async fn run_test(paths: &[PathBuf]) {
         read_errors,
     } = check_files(&files);
 
-    let mut to_run: Vec<(PathBuf, String, SourceFile)> =
-        Vec::with_capacity(checked.len());
-    let mut failing: Vec<&CheckedFile> = Vec::new();
-
-    for f in &checked {
-        if f.diags.iter().any(|d| d.severity == Severity::Error) {
-            failing.push(f);
-        }
-    }
+    let (failing, clean): (Vec<_>, Vec<_>) = checked
+        .into_iter()
+        .partition(|f| f.diags.iter().any(|d| d.severity == Severity::Error));
 
     if !read_errors.is_empty() || !failing.is_empty() {
         for (path, e) in &read_errors {
@@ -163,24 +157,23 @@ async fn run_test(paths: &[PathBuf]) {
         process::exit(1);
     }
 
-    // No errors and no read failures — every entry is guaranteed to have an
-    // AST. Move them into the run list.
-    for f in checked {
-        if let Some(ast) = f.ast {
-            to_run.push((f.path, f.src, ast));
-        }
-    }
-
     let mut passed = 0;
     let mut failed = 0;
 
-    for (path, src, ast) in &to_run {
-        let report = ill_core::runtime::harness::run_validated_test_file(path, ast).await;
+    for f in &clean {
+        // `clean` came from a successful `check_files` walk that produced no
+        // errors; an `ast = None` would only happen on parse failure, which
+        // always emits errors and lands the file in `failing`.
+        let ast = f
+            .ast
+            .as_ref()
+            .expect("check_files invariant: error-free file has Some(ast)");
+        let report = ill_core::runtime::harness::run_validated_test_file(&f.path, ast).await;
         if report.passed {
-            println!("PASS {}", path.display());
+            println!("PASS {}", f.path.display());
             passed += 1;
         } else {
-            print_failed_report(&report, src);
+            print_failed_report(&report, &f.src);
             failed += 1;
         }
     }
@@ -364,7 +357,7 @@ fn run_check(paths: &[PathBuf]) {
     let mut hint_count = 0;
 
     for (path, e) in &read_errors {
-        eprintln!("{}: error reading file: {e}", path.display());
+        eprintln!("ill: error reading {}: {e}", path.display());
         error_count += 1;
     }
 
