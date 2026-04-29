@@ -5,72 +5,7 @@
 // problem so we can report multiple issues at once.
 
 use crate::ast::*;
-
-// ── Errors ─────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub enum LowerError {
-    UnexpectedNode {
-        kind: String,
-        span: Span,
-    },
-    MissingField {
-        parent: String,
-        field: String,
-        span: Span,
-    },
-    InvalidLiteral {
-        text: String,
-        span: Span,
-    },
-    InvalidEscape {
-        message: String,
-        span: Span,
-    },
-    TreeSitterError {
-        span: Span,
-    },
-}
-
-impl std::fmt::Display for LowerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LowerError::UnexpectedNode { kind, span } => {
-                write!(
-                    f,
-                    "unexpected node `{}` at {}..{}",
-                    kind, span.start, span.end
-                )
-            }
-            LowerError::MissingField {
-                parent,
-                field,
-                span,
-            } => {
-                write!(
-                    f,
-                    "missing field `{}` on `{}` at {}..{}",
-                    field, parent, span.start, span.end
-                )
-            }
-            LowerError::InvalidLiteral { text, span } => {
-                write!(
-                    f,
-                    "invalid literal `{}` at {}..{}",
-                    text, span.start, span.end
-                )
-            }
-            LowerError::InvalidEscape { message, span } => {
-                write!(f, "{} at {}..{}", message, span.start, span.end)
-            }
-            LowerError::TreeSitterError { span } => {
-                write!(f, "parse error at {}..{}", span.start, span.end)
-            }
-        }
-    }
-}
-
-impl std::error::Error for LowerError {}
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 
 /// Process backslash escape sequences in a double-quoted string fragment.
 /// Squiggles and single-quoted strings are raw and skip this pass.
@@ -131,7 +66,7 @@ pub fn normalize(src: &str) -> String {
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
-pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
+pub fn lower(source: &str) -> Result<SourceFile, Vec<Diagnostic>> {
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_ill::LANGUAGE.into())
@@ -164,7 +99,7 @@ pub fn lower(source: &str) -> Result<SourceFile, Vec<LowerError>> {
 
 struct LowerCtx<'a> {
     source: &'a str,
-    errors: Vec<LowerError>,
+    errors: Vec<Diagnostic>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -180,15 +115,65 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn collect_errors(&mut self, node: tree_sitter::Node) {
-        if node.is_error() || node.is_missing() {
-            self.errors.push(LowerError::TreeSitterError {
-                span: self.span(node),
-            });
+        if node.is_missing() {
+            // MISSING nodes are tree-sitter's recovery hint for "expected X here
+            // but didn't see it". `node.kind()` carries the expected token type.
+            let kind = node.kind();
+            let msg = if kind.is_empty() {
+                "missing token here".to_string()
+            } else {
+                format!("missing `{kind}` here")
+            };
+            self.errors.push(Diagnostic::error(
+                self.span(node),
+                DiagnosticCode::MissingToken,
+                msg,
+            ));
+            // MISSING nodes don't have meaningful children; stop descending.
+            return;
         }
+
+        if node.is_error() {
+            // ERROR nodes wrap whatever the parser couldn't make sense of.
+            // We emit one diagnostic per ERROR and don't walk into it — its
+            // children are byproducts of recovery, not real errors the user
+            // should see.
+            self.errors.push(self.error_diagnostic(node));
+            return;
+        }
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.collect_errors(child);
         }
+    }
+
+    /// Build a diagnostic for an ERROR node. Looks at the surrounding context
+    /// to produce something more useful than "parse error at 676..702".
+    fn error_diagnostic(&self, node: tree_sitter::Node) -> Diagnostic {
+        let span = self.span(node);
+        let snippet = self.text(node);
+        let trimmed = snippet.trim();
+        let mut chars = trimmed.chars();
+        let preview: String = chars.by_ref().take(40).collect();
+        let preview_suffix = if chars.next().is_some() { "…" } else { "" };
+
+        let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+
+        let message = if trimmed.is_empty() {
+            match parent_kind {
+                "" | "source_file" => "unexpected input here".to_string(),
+                kind => format!("unexpected input inside `{kind}`"),
+            }
+        } else {
+            format!("unexpected `{preview}{preview_suffix}`")
+        };
+
+        let mut diag = Diagnostic::error(span, DiagnosticCode::ParseError, message);
+        if !parent_kind.is_empty() && parent_kind != "source_file" {
+            diag = diag.with_note(format!("while parsing a `{parent_kind}`"));
+        }
+        diag
     }
 
     // ── Source file ────────────────────────────────────────────────────────
@@ -209,11 +194,15 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 "NEWLINE" | "comment" => {}
+                // ERROR/MISSING were already reported by collect_errors; don't
+                // double-flag them here as "unexpected node".
+                _ if child.is_error() || child.is_missing() => {}
                 _ => {
-                    self.errors.push(LowerError::UnexpectedNode {
-                        kind: child.kind().to_string(),
-                        span: self.span(child),
-                    });
+                    self.errors.push(Diagnostic::error(
+                        self.span(child),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("unexpected `{}` at top level", child.kind()),
+                    ));
                 }
             }
         }
@@ -413,11 +402,13 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 "INDENT" | "DEDENT" | "NEWLINE" | "comment" => {}
+                _ if child.is_error() || child.is_missing() => {}
                 _ => {
-                    self.errors.push(LowerError::UnexpectedNode {
-                        kind: child.kind().to_string(),
-                        span: self.span(child),
-                    });
+                    self.errors.push(Diagnostic::error(
+                        self.span(child),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("unexpected `{}` inside `as` block", child.kind()),
+                    ));
                 }
             }
         }
@@ -557,10 +548,11 @@ impl<'a> LowerCtx<'a> {
             "matches" => ComparisonOp::Matches,
             "!matches" => ComparisonOp::NotMatches,
             _ => {
-                self.errors.push(LowerError::InvalidLiteral {
-                    text: text.to_string(),
-                    span: self.span(node),
-                });
+                self.errors.push(Diagnostic::error(
+                    self.span(node),
+                    DiagnosticCode::InvalidLiteral,
+                    format!("`{text}` is not a valid comparison operator"),
+                ));
                 return None;
             }
         };
@@ -623,10 +615,13 @@ impl<'a> LowerCtx<'a> {
                 self.lower_primary(node)
             }
             _ => {
-                self.errors.push(LowerError::UnexpectedNode {
-                    kind: node.kind().to_string(),
-                    span: self.span(node),
-                });
+                if !node.is_error() && !node.is_missing() {
+                    self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("expected an expression, found `{}`", node.kind()),
+                    ));
+                }
                 None
             }
         }
@@ -640,10 +635,11 @@ impl<'a> LowerCtx<'a> {
                 match text.parse::<i64>() {
                     Ok(n) => Some(Expr::Number(n)),
                     Err(_) => {
-                        self.errors.push(LowerError::InvalidLiteral {
-                            text: text.to_string(),
-                            span: self.span(node),
-                        });
+                        self.errors.push(Diagnostic::error(
+                            self.span(node),
+                            DiagnosticCode::InvalidLiteral,
+                            format!("`{text}` is not a valid integer"),
+                        ));
                         None
                     }
                 }
@@ -660,10 +656,13 @@ impl<'a> LowerCtx<'a> {
             "squiggle" => self.lower_squiggle(node),
             "array" => self.lower_array(node),
             _ => {
-                self.errors.push(LowerError::UnexpectedNode {
-                    kind: node.kind().to_string(),
-                    span: self.span(node),
-                });
+                if !node.is_error() && !node.is_missing() {
+                    self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::UnexpectedNode,
+                        format!("expected a value, found `{}`", node.kind()),
+                    ));
+                }
                 None
             }
         }
@@ -748,10 +747,11 @@ impl<'a> LowerCtx<'a> {
             if let StringFragment::Text(t) = frag {
                 match unescape(t) {
                     Ok(s) => *t = s,
-                    Err(message) => self.errors.push(LowerError::InvalidEscape {
+                    Err(message) => self.errors.push(Diagnostic::error(
+                        self.span(node),
+                        DiagnosticCode::InvalidEscape,
                         message,
-                        span: self.span(node),
-                    }),
+                    )),
                 }
             }
         }
@@ -805,11 +805,11 @@ impl<'a> LowerCtx<'a> {
 
     fn lower_ident_field(&mut self, node: tree_sitter::Node, field: &str) -> Option<Ident> {
         let child = node.child_by_field_name(field).or_else(|| {
-            self.errors.push(LowerError::MissingField {
-                parent: node.kind().to_string(),
-                field: field.to_string(),
-                span: self.span(node),
-            });
+            self.errors.push(Diagnostic::error(
+                self.span(node),
+                DiagnosticCode::MissingField,
+                format!("`{}` is missing required `{field}`", node.kind()),
+            ));
             None
         })?;
         Some(self.ident_from_node(child))
@@ -1092,6 +1092,66 @@ actor a = args_actor,
             }
             _ => panic!("expected actor declaration"),
         }
+    }
+
+    // ── Parse-error dedupe (regression: each ERROR used to emit two diagnostics) ──
+
+    #[test]
+    fn parse_error_emits_one_diagnostic_per_error_node() {
+        // `@@@` mid-block forces tree-sitter into ERROR recovery. The old
+        // collect_errors+fall-through path emitted both a TreeSitterError AND
+        // an UnexpectedNode for the same span. New code must not.
+        let source = "\
+actor a = container
+as a:
+  @@@
+";
+        let errs = lower(source).expect_err("should fail to lower");
+
+        let mut spans: Vec<(usize, usize)> =
+            errs.iter().map(|d| (d.span.start, d.span.end)).collect();
+        spans.sort();
+        let dedup_len = {
+            let mut s = spans.clone();
+            s.dedup();
+            s.len()
+        };
+        assert_eq!(
+            spans.len(),
+            dedup_len,
+            "two diagnostics share a span — dedupe regression: {errs:?}"
+        );
+
+        // No diagnostic for an ERROR site should leak through as UnexpectedNode
+        // (that's the lower_block fall-through case the dedupe fix targets).
+        assert!(
+            !errs
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnexpectedNode
+                    && d.message.contains("ERROR")),
+            "leaked tree-sitter ERROR terminology as UnexpectedNode: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn parse_error_carries_parent_context_note() {
+        // Garbage inside a known-good command position parks the ERROR under a
+        // named parent (`command` / `block`), so the "while parsing a `X`"
+        // footer should fire on at least one diagnostic.
+        let source = "\
+actor a = container
+as a:
+  receive @@@bogus@@@
+";
+        let errs = lower(source).expect_err("should fail to lower");
+        let any_with_note = errs.iter().any(|d| {
+            d.code == DiagnosticCode::ParseError
+                && d.notes.iter().any(|n| n.starts_with("while parsing a"))
+        });
+        assert!(
+            any_with_note,
+            "expected at least one ParseError with a `while parsing a ...` note, got: {errs:?}"
+        );
     }
 
     #[test]

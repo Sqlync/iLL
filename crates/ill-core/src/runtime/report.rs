@@ -18,7 +18,7 @@ pub struct TestReport {
 /// the test passing.
 pub enum StatementReport {
     ValidationFailure(Vec<Diagnostic>),
-    ParseFailure(Vec<String>),
+    ParseFailure(Vec<Diagnostic>),
     ConstructFailure {
         actor: String,
         message: String,

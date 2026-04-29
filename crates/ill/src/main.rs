@@ -4,7 +4,8 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
-use ill_core::diagnostic::Severity;
+use ill_core::diagnostic::{Diagnostic, Severity};
+use ill_core::render;
 use ill_core::runtime::report::{StatementReport, TestReport};
 
 const ILL_EXTENSION: &str = "ill";
@@ -132,7 +133,7 @@ async fn run_test(paths: &[PathBuf]) {
             println!("PASS {}", path.display());
             passed += 1;
         } else {
-            print_failed_report(&report);
+            print_failed_report(&report, &src);
             failed += 1;
         }
     }
@@ -144,19 +145,25 @@ async fn run_test(paths: &[PathBuf]) {
     }
 }
 
-fn print_failed_report(report: &TestReport) {
+/// Render diagnostics with a plain-text fallback if the rich renderer fails
+/// (e.g. EPIPE on stderr). Better to lose color than to silently drop the
+/// diagnostic body.
+fn render_or_fallback(path: &Path, source: &str, diags: &[Diagnostic]) {
+    let mut stderr = render::stderr_writer();
+    if let Err(e) = render::render(path, source, diags, &mut stderr) {
+        eprintln!("ill: failed to render diagnostics: {e}");
+        for d in diags {
+            eprintln!("  {d}");
+        }
+    }
+}
+
+fn print_failed_report(report: &TestReport, source: &str) {
     eprintln!("FAIL {}", report.path.display());
     for s in &report.statements {
         match s {
-            StatementReport::ParseFailure(msgs) => {
-                for m in msgs {
-                    eprintln!("  parse error: {m}");
-                }
-            }
-            StatementReport::ValidationFailure(diags) => {
-                for d in diags {
-                    eprintln!("  {d}");
-                }
+            StatementReport::ParseFailure(diags) | StatementReport::ValidationFailure(diags) => {
+                render_or_fallback(&report.path, source, diags);
             }
             StatementReport::ConstructFailure {
                 actor,
@@ -262,8 +269,8 @@ fn run_check(paths: &[PathBuf]) {
         match ill_core::lower::lower(&src) {
             Ok(ast) => {
                 let diags = ill_core::validate::validate(&ast);
+                render_or_fallback(path, &src, &diags);
                 for d in &diags {
-                    eprintln!("{}: {d}", path.display());
                     match d.severity {
                         Severity::Error => error_count += 1,
                         Severity::Warning => warning_count += 1,
@@ -273,9 +280,7 @@ fn run_check(paths: &[PathBuf]) {
                 }
             }
             Err(errors) => {
-                for e in &errors {
-                    eprintln!("{}: {e}", path.display());
-                }
+                render_or_fallback(path, &src, &errors);
                 error_count += errors.len();
             }
         }

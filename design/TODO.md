@@ -5,6 +5,13 @@
 
 ## Next
 
+
+## Near Term
+
+Error diagnostics
+- Suppress derivative diagnostics from poisoned names
+  - ex: a bad actor definition will be reported again when the actor (that failed to be created) is used
+pg_client.connect accepts application
 Restore testing of MQTT client cases that CC removed / couldn't implement
 - see: https://github.com/Sqlync/iLL/pull/28/changes
 - user properties
@@ -31,8 +38,6 @@ as alice:
 receive disconnect
 assert ok.reason_code == 142
 ```
-
-## Near Term
 create ~json_b squiggle
 squiggles
 - actually validate squiggle contents

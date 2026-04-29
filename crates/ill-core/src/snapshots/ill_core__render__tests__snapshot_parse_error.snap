@@ -1,0 +1,12 @@
+---
+source: crates/ill-core/src/render.rs
+assertion_line: 82
+expression: "render_to_string(\"demo.ill\", source, &[diag])"
+---
+error[E0001]: unexpected `@@@`
+  ┌─ demo.ill:3:3
+  │
+3 │   @@@
+  │   ^^^
+  │
+  = while parsing a `block`

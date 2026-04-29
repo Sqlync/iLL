@@ -3,6 +3,7 @@ pub mod ast;
 pub mod diagnostic;
 pub mod lower;
 pub mod registry;
+pub mod render;
 pub mod runtime;
 pub mod validate;
 
