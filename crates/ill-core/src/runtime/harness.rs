@@ -24,13 +24,11 @@ use super::{
 };
 
 /// Run a single .ill test file and return a structured report.
+///
+/// Performs the full pipeline: lower → validate → execute. Callers that
+/// have already validated (e.g. the `ill test` preflight gate) should use
+/// [`run_validated_test_file`] instead to skip the redundant work.
 pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
-    let source_dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-
     let ast = match crate::lower::lower(src) {
         Ok(a) => a,
         Err(errors) => {
@@ -43,8 +41,7 @@ pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
         }
     };
 
-    let diags = crate::validate::validate(&ast);
-    let errors: Vec<_> = diags
+    let errors: Vec<_> = crate::validate::validate(&ast)
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
         .collect();
@@ -57,7 +54,18 @@ pub async fn run_test_file(path: &Path, src: &str) -> TestReport {
         };
     }
 
-    execute(path, &ast, &source_dir).await
+    run_validated_test_file(path, &ast).await
+}
+
+/// Run a `.ill` file whose AST has already been parsed and validated by
+/// the caller. Skips lower + validate; proceeds straight to execution.
+pub async fn run_validated_test_file(path: &Path, ast: &SourceFile) -> TestReport {
+    let source_dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    execute(path, ast, &source_dir).await
 }
 
 async fn execute(path: &Path, source: &SourceFile, source_dir: &Path) -> TestReport {

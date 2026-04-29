@@ -4,6 +4,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
+use ill_core::ast::SourceFile;
 use ill_core::diagnostic::{Diagnostic, Severity};
 use ill_core::render;
 use ill_core::runtime::report::{StatementReport, TestReport};
@@ -115,25 +116,61 @@ async fn run_test(paths: &[PathBuf]) {
         process::exit(1);
     }
 
+    // Run `check` first as a gate. Tests have real side effects (containers,
+    // REST calls, SQL); half-running a suite where some files are
+    // known-broken wastes time and pollutes external state. Mirrors the gate
+    // model used by `cargo test` and `go test`.
+    let CheckedSuite {
+        files: checked,
+        read_errors,
+    } = check_files(&files);
+
+    let (failing, clean): (Vec<_>, Vec<_>) = checked
+        .into_iter()
+        .partition(|f| f.diags.iter().any(|d| d.severity == Severity::Error));
+
+    if !read_errors.is_empty() || !failing.is_empty() {
+        for (path, e) in &read_errors {
+            eprintln!("ill: error reading {}: {e}", path.display());
+        }
+        if !failing.is_empty() {
+            if failing.len() == 1 {
+                eprintln!("ill: {} failed validation", failing[0].path.display());
+            } else {
+                eprintln!("ill: {} files failed validation:", failing.len());
+                for f in &failing {
+                    eprintln!("  {}", f.path.display());
+                }
+            }
+            eprintln!();
+            for f in &failing {
+                let errors: Vec<Diagnostic> = f
+                    .diags
+                    .iter()
+                    .filter(|d| d.severity == Severity::Error)
+                    .cloned()
+                    .collect();
+                render_or_fallback(&f.path, &f.src, &errors);
+            }
+        }
+        eprintln!("ill: not running tests");
+        process::exit(1);
+    }
+
     let mut passed = 0;
     let mut failed = 0;
 
-    for path in &files {
-        let src = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error reading {}: {e}", path.display());
-                failed += 1;
-                continue;
-            }
-        };
-
-        let report = ill_core::runtime::harness::run_test_file(path, &src).await;
+    for f in &clean {
+        let ast = f
+            .ast
+            .as_ref()
+            .expect("check_files invariant: error-free file has Some(ast)");
+        let report = ill_core::runtime::harness::run_validated_test_file(&f.path, ast).await;
         if report.passed {
-            println!("PASS {}", path.display());
+            println!("PASS {}", f.path.display());
             passed += 1;
         } else {
-            print_failed_report(&report, &src);
+            print_failed_report(&report, &f.src);
             failed += 1;
         }
     }
@@ -142,6 +179,61 @@ async fn run_test(paths: &[PathBuf]) {
 
     if failed > 0 {
         process::exit(1);
+    }
+}
+
+/// Result of [`check_files`]: per-file parse + validation outcomes plus any
+/// I/O failures encountered while reading.
+struct CheckedSuite {
+    files: Vec<CheckedFile>,
+    read_errors: Vec<(PathBuf, std::io::Error)>,
+}
+
+/// One file's check outcome. `ast` is `Some` iff parsing succeeded, in which
+/// case `diags` holds the validator's full output (any severity). On parse
+/// failure, `ast` is `None` and `diags` holds the parse errors.
+struct CheckedFile {
+    path: PathBuf,
+    src: String,
+    ast: Option<SourceFile>,
+    diags: Vec<Diagnostic>,
+}
+
+/// Read, parse, and validate every selected file. Used by both `ill check`
+/// (which renders the diagnostics directly) and `ill test`'s pre-run gate
+/// (which only blocks on `Severity::Error`).
+fn check_files(files: &[PathBuf]) -> CheckedSuite {
+    let mut out = Vec::with_capacity(files.len());
+    let mut read_errors = Vec::new();
+
+    for path in files {
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                read_errors.push((path.clone(), e));
+                continue;
+            }
+        };
+
+        let (ast, diags) = match ill_core::lower::lower(&src) {
+            Ok(ast) => {
+                let diags = ill_core::validate::validate(&ast);
+                (Some(ast), diags)
+            }
+            Err(errors) => (None, errors),
+        };
+
+        out.push(CheckedFile {
+            path: path.clone(),
+            src,
+            ast,
+            diags,
+        });
+    }
+
+    CheckedSuite {
+        files: out,
+        read_errors,
     }
 }
 
@@ -251,37 +343,29 @@ fn run_check(paths: &[PathBuf]) {
         process::exit(1);
     }
 
+    let CheckedSuite {
+        files: checked,
+        read_errors,
+    } = check_files(&files);
+
     let mut error_count = 0;
     let mut warning_count = 0;
     let mut info_count = 0;
     let mut hint_count = 0;
 
-    for path in &files {
-        let src = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("{}: error reading file: {e}", path.display());
-                error_count += 1;
-                continue;
-            }
-        };
+    for (path, e) in &read_errors {
+        eprintln!("ill: error reading {}: {e}", path.display());
+        error_count += 1;
+    }
 
-        match ill_core::lower::lower(&src) {
-            Ok(ast) => {
-                let diags = ill_core::validate::validate(&ast);
-                render_or_fallback(path, &src, &diags);
-                for d in &diags {
-                    match d.severity {
-                        Severity::Error => error_count += 1,
-                        Severity::Warning => warning_count += 1,
-                        Severity::Info => info_count += 1,
-                        Severity::Hint => hint_count += 1,
-                    }
-                }
-            }
-            Err(errors) => {
-                render_or_fallback(path, &src, &errors);
-                error_count += errors.len();
+    for f in &checked {
+        render_or_fallback(&f.path, &f.src, &f.diags);
+        for d in &f.diags {
+            match d.severity {
+                Severity::Error => error_count += 1,
+                Severity::Warning => warning_count += 1,
+                Severity::Info => info_count += 1,
+                Severity::Hint => hint_count += 1,
             }
         }
     }
