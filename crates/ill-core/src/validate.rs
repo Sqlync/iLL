@@ -93,6 +93,14 @@ pub fn validate(source: &SourceFile) -> Vec<Diagnostic> {
 }
 
 impl<'r> Validator<'r> {
+    fn healthy(&self, name: &str) -> Option<&HealthyActor> {
+        self.actors.get(name).and_then(ActorState::as_healthy)
+    }
+
+    fn healthy_mut(&mut self, name: &str) -> Option<&mut HealthyActor> {
+        self.actors.get_mut(name).and_then(ActorState::as_healthy_mut)
+    }
+
     fn run(&mut self, source: &SourceFile) {
         // First pass: collect actor declarations so `as` blocks can reference
         // actors in any order.
@@ -216,11 +224,7 @@ impl<'r> Validator<'r> {
                     // but only if that command's outcome was ok.
                     if outcome.is_ok() {
                         if let Some(next_mode) = pending_transition {
-                            if let Some(state) = self
-                                .actors
-                                .get_mut(&block.actor.name)
-                                .and_then(ActorState::as_healthy_mut)
-                            {
+                            if let Some(state) = self.healthy_mut(&block.actor.name) {
                                 state.mode = next_mode;
                             }
                         }
@@ -270,11 +274,7 @@ impl<'r> Validator<'r> {
                             }
                         }
                     };
-                    if let Some(state) = self
-                        .actors
-                        .get_mut(&block.actor.name)
-                        .and_then(ActorState::as_healthy_mut)
-                    {
+                    if let Some(state) = self.healthy_mut(&block.actor.name) {
                         state.vars.insert(let_stmt.name.name.clone(), ty);
                     }
                 }
@@ -305,11 +305,7 @@ impl<'r> Validator<'r> {
         // Apply the pending transition for the final command in the block.
         if outcome.is_ok() {
             if let Some(next_mode) = pending_transition {
-                if let Some(state) = self
-                    .actors
-                    .get_mut(&block.actor.name)
-                    .and_then(ActorState::as_healthy_mut)
-                {
+                if let Some(state) = self.healthy_mut(&block.actor.name) {
                     state.mode = next_mode;
                 }
             }
@@ -332,7 +328,7 @@ impl<'r> Validator<'r> {
     ) {
         // Errored actors return empty here — the declaration already errored,
         // so any command-shape issues would be derivative noise.
-        let Some(state) = self.actors.get(actor_name).and_then(ActorState::as_healthy) else {
+        let Some(state) = self.healthy(actor_name) else {
             return (&[], &[], None);
         };
         let type_def = state.type_def;
@@ -508,9 +504,7 @@ impl<'r> Validator<'r> {
                 // None for non-ok/error roots → Unknown.
                 if let Expr::Ident(root) = object.as_ref() {
                     if root.name == "self" {
-                        if let Some(state) =
-                            self.actors.get(actor_name).and_then(ActorState::as_healthy)
-                        {
+                        if let Some(state) = self.healthy(actor_name) {
                             if let Some(ty) = state.vars.get(&property.name) {
                                 return *ty;
                             }
@@ -522,7 +516,7 @@ impl<'r> Validator<'r> {
                     .unwrap_or(ValueType::Unknown)
             }
             Expr::Ident(ident) => {
-                if let Some(state) = self.actors.get(actor_name).and_then(ActorState::as_healthy) {
+                if let Some(state) = self.healthy(actor_name) {
                     if let Some(ty) = state.vars.get(&ident.name) {
                         return *ty;
                     }
