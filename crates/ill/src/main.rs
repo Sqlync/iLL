@@ -244,6 +244,7 @@ fn run_check(paths: &[PathBuf]) {
     let mut warning_count = 0;
     let mut info_count = 0;
     let mut hint_count = 0;
+    let mut stderr = StandardStream::stderr(ColorChoice::Auto);
 
     for path in &files {
         let src = match std::fs::read_to_string(path) {
@@ -255,7 +256,6 @@ fn run_check(paths: &[PathBuf]) {
             }
         };
 
-        let mut stderr = StandardStream::stderr(ColorChoice::Auto);
         match ill_core::lower::lower(&src) {
             Ok(ast) => {
                 let diags = ill_core::validate::validate(&ast);

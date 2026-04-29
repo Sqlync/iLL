@@ -195,9 +195,7 @@ impl<'a> LowerCtx<'a> {
                 "NEWLINE" | "comment" => {}
                 // ERROR/MISSING were already reported by collect_errors; don't
                 // double-flag them here as "unexpected node".
-                k if child.is_error() || child.is_missing() => {
-                    let _ = k;
-                }
+                _ if child.is_error() || child.is_missing() => {}
                 _ => {
                     self.errors.push(Diagnostic::error(
                         self.span(child),
@@ -403,9 +401,7 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 "INDENT" | "DEDENT" | "NEWLINE" | "comment" => {}
-                k if child.is_error() || child.is_missing() => {
-                    let _ = k;
-                }
+                _ if child.is_error() || child.is_missing() => {}
                 _ => {
                     self.errors.push(Diagnostic::error(
                         self.span(child),
@@ -1095,6 +1091,66 @@ actor a = args_actor,
             }
             _ => panic!("expected actor declaration"),
         }
+    }
+
+    // ── Parse-error dedupe (regression: each ERROR used to emit two diagnostics) ──
+
+    #[test]
+    fn parse_error_emits_one_diagnostic_per_error_node() {
+        // `@@@` mid-block forces tree-sitter into ERROR recovery. The old
+        // collect_errors+fall-through path emitted both a TreeSitterError AND
+        // an UnexpectedNode for the same span. New code must not.
+        let source = "\
+actor a = container
+as a:
+  @@@
+";
+        let errs = lower(source).expect_err("should fail to lower");
+
+        let mut spans: Vec<(usize, usize)> =
+            errs.iter().map(|d| (d.span.start, d.span.end)).collect();
+        spans.sort();
+        let dedup_len = {
+            let mut s = spans.clone();
+            s.dedup();
+            s.len()
+        };
+        assert_eq!(
+            spans.len(),
+            dedup_len,
+            "two diagnostics share a span — dedupe regression: {errs:?}"
+        );
+
+        // No diagnostic for an ERROR site should leak through as UnexpectedNode
+        // (that's the lower_block fall-through case the dedupe fix targets).
+        assert!(
+            !errs
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnexpectedNode
+                    && d.message.contains("ERROR")),
+            "leaked tree-sitter ERROR terminology as UnexpectedNode: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn parse_error_carries_parent_context_note() {
+        // Garbage inside a known-good command position parks the ERROR under a
+        // named parent (`command` / `block`), so the "while parsing a `X`"
+        // footer should fire on at least one diagnostic.
+        let source = "\
+actor a = container
+as a:
+  receive @@@bogus@@@
+";
+        let errs = lower(source).expect_err("should fail to lower");
+        let any_with_note = errs.iter().any(|d| {
+            d.code == DiagnosticCode::ParseError
+                && d.notes.iter().any(|n| n.starts_with("while parsing a"))
+        });
+        assert!(
+            any_with_note,
+            "expected at least one ParseError with a `while parsing a ...` note, got: {errs:?}"
+        );
     }
 
     #[test]

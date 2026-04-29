@@ -45,6 +45,32 @@ pub enum DiagnosticCode {
     UnknownSquiggle,
 }
 
+impl DiagnosticCode {
+    /// Stable string form for the code, used by the renderer and (eventually)
+    /// LSP `codeDescription` links. Numeric ranges are namespaced by category:
+    /// 000x parse/lower, 010x names, 020x commands, 030x types, 040x squiggles.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticCode::ParseError => "E0001",
+            DiagnosticCode::MissingToken => "E0002",
+            DiagnosticCode::UnexpectedNode => "E0003",
+            DiagnosticCode::MissingField => "E0004",
+            DiagnosticCode::InvalidLiteral => "E0005",
+            DiagnosticCode::InvalidEscape => "E0006",
+            DiagnosticCode::UnknownActorType => "E0101",
+            DiagnosticCode::UnknownActor => "E0102",
+            DiagnosticCode::DuplicateActor => "E0103",
+            DiagnosticCode::UnknownCommand => "E0201",
+            DiagnosticCode::CommandNotValidInMode => "E0202",
+            DiagnosticCode::MissingRequiredArg => "E0203",
+            DiagnosticCode::UnknownKeywordArg => "E0204",
+            DiagnosticCode::ConflictingOutcomeAsserts => "E0205",
+            DiagnosticCode::TypeMismatch => "E0301",
+            DiagnosticCode::UnknownSquiggle => "E0401",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub span: Span,

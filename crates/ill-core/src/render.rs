@@ -8,7 +8,7 @@ use codespan_reporting::diagnostic::{Diagnostic as CsrDiagnostic, Label};
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term::{self, termcolor::WriteColor, Config};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, Severity};
+use crate::diagnostic::{Diagnostic, Severity};
 
 /// Render a batch of diagnostics for a single source file. The path is used for
 /// the snippet header; the source string is needed to resolve byte offsets to
@@ -46,28 +46,63 @@ fn to_csr(d: &Diagnostic) -> CsrDiagnostic<()> {
 
     CsrDiagnostic::new(severity)
         .with_message(&d.message)
-        .with_code(code_str(d.code))
+        .with_code(d.code.as_str())
         .with_labels(vec![Label::primary((), range)])
         .with_notes(d.notes.clone())
 }
 
-fn code_str(code: DiagnosticCode) -> &'static str {
-    match code {
-        DiagnosticCode::ParseError => "E0001",
-        DiagnosticCode::MissingToken => "E0002",
-        DiagnosticCode::UnexpectedNode => "E0003",
-        DiagnosticCode::MissingField => "E0004",
-        DiagnosticCode::InvalidLiteral => "E0005",
-        DiagnosticCode::InvalidEscape => "E0006",
-        DiagnosticCode::UnknownActorType => "E0101",
-        DiagnosticCode::UnknownActor => "E0102",
-        DiagnosticCode::DuplicateActor => "E0103",
-        DiagnosticCode::UnknownCommand => "E0201",
-        DiagnosticCode::CommandNotValidInMode => "E0202",
-        DiagnosticCode::MissingRequiredArg => "E0203",
-        DiagnosticCode::UnknownKeywordArg => "E0204",
-        DiagnosticCode::ConflictingOutcomeAsserts => "E0205",
-        DiagnosticCode::TypeMismatch => "E0301",
-        DiagnosticCode::UnknownSquiggle => "E0401",
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codespan_reporting::term::termcolor::NoColor;
+
+    fn render_to_string(path: &str, source: &str, diags: &[Diagnostic]) -> String {
+        let mut buf = NoColor::new(Vec::new());
+        render(Path::new(path), source, diags, &mut buf).expect("render must succeed");
+        String::from_utf8(buf.into_inner()).expect("rendered output must be utf-8")
+    }
+
+    #[test]
+    fn snapshot_parse_error() {
+        // Hand-written diagnostic mimicking what collect_errors produces for
+        // a garbage `@@@` mid-block — frozen so renderer changes are visible
+        // in review.
+        let source = "actor a = container\nas a:\n  @@@\n";
+        let span_start = source.find("@@@").unwrap();
+        let span_end = span_start + 3;
+        let diag = Diagnostic::error(
+            crate::ast::Span {
+                start: span_start,
+                end: span_end,
+            },
+            crate::diagnostic::DiagnosticCode::ParseError,
+            "unexpected `@@@`",
+        )
+        .with_note("while parsing a `block`");
+        insta::assert_snapshot!(render_to_string("demo.ill", source, &[diag]));
+    }
+
+    #[test]
+    fn snapshot_validation_error() {
+        let source = "actor bob = unknownthing\n";
+        let diag = Diagnostic::error(
+            crate::ast::Span { start: 12, end: 24 },
+            crate::diagnostic::DiagnosticCode::UnknownActorType,
+            "unknown actor type `unknownthing`",
+        );
+        insta::assert_snapshot!(render_to_string("demo.ill", source, &[diag]));
+    }
+
+    #[test]
+    fn snapshot_zero_length_span_widens() {
+        // MISSING tokens come through with start == end. Renderer must widen
+        // by one to satisfy codespan-reporting and still produce a usable caret.
+        let source = "actor a = container\n";
+        let diag = Diagnostic::error(
+            crate::ast::Span { start: 5, end: 5 },
+            crate::diagnostic::DiagnosticCode::MissingToken,
+            "missing `=` here",
+        );
+        insta::assert_snapshot!(render_to_string("demo.ill", source, &[diag]));
     }
 }
