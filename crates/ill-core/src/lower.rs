@@ -979,6 +979,46 @@ actor args = args_actor,
         }
     }
 
+    #[test]
+    fn lower_negative_numbers() {
+        let source = "\
+actor db = container
+as db:
+  assert ok.row[1] == [\"root\", -4, \"root\", \"0000000000\"]
+  assert ok.code == -1
+";
+        let file = lower(source).expect("negative numbers should lower cleanly");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+
+        let array_rhs = match &as_block.body[0] {
+            Statement::Assert(a) => a.right.as_ref(),
+            _ => panic!("expected assert statement"),
+        };
+        match array_rhs {
+            Some(Expr::Array(elems)) => match &elems[1] {
+                Expr::Number(n) => assert_eq!(*n, -4),
+                other => panic!("expected number, got {other:?}"),
+            },
+            other => panic!("expected array, got {other:?}"),
+        }
+
+        let scalar_rhs = match &as_block.body[1] {
+            Statement::Assert(a) => a.right.as_ref(),
+            _ => panic!("expected assert statement"),
+        };
+        match scalar_rhs {
+            Some(Expr::Number(n)) => assert_eq!(*n, -1),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
     // ── Corpus smoke test ───────────────────────────────────────────────────
 
     /// Every `.ill` file under examples/ must parse cleanly and lower to an
