@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand};
 use ill_core::ast::SourceFile;
 use ill_core::diagnostic::{Diagnostic, Severity};
 use ill_core::render;
+use ill_core::report_format::write_failure;
 use ill_core::runtime::report::TestReport;
-use ill_core::runtime::report_format::write_failure;
 
 const ILL_EXTENSION: &str = "ill";
 

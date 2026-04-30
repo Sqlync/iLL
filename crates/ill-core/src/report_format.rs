@@ -17,8 +17,7 @@ use codespan_reporting::term::termcolor::NoColor;
 use crate::ast::Span;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::render;
-
-use super::report::{StatementReport, TestReport};
+use crate::runtime::report::{StatementReport, TestReport};
 
 /// Stream a failure report to `w`. Mirrors `render::render`'s shape so the two
 /// renderers feel like siblings.
