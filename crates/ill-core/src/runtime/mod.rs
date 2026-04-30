@@ -13,6 +13,7 @@ pub mod eval;
 pub mod harness;
 pub mod members;
 pub mod report;
+pub mod report_format;
 pub mod squiggle;
 
 pub use members::Members;
