@@ -36,6 +36,26 @@ pub fn render(
     Ok(())
 }
 
+/// Render diagnostics, falling back to a plain-text dump if the rich renderer
+/// fails (e.g. an out-of-range span or a write error mid-snippet). Better to
+/// lose source-snippet formatting than to silently drop the diagnostic body.
+pub fn render_with_fallback(
+    path: &Path,
+    source: &str,
+    diags: &[Diagnostic],
+    writer: &mut dyn WriteColor,
+) {
+    if let Err(e) = render(path, source, diags, writer) {
+        let _ = writeln!(writer, "  failed to render diagnostics: {e}");
+        for d in diags {
+            let _ = writeln!(writer, "  {d}");
+            for note in &d.notes {
+                let _ = writeln!(writer, "    {note}");
+            }
+        }
+    }
+}
+
 fn to_csr(d: &Diagnostic) -> CsrDiagnostic<()> {
     let severity = match d.severity {
         Severity::Error => codespan_reporting::diagnostic::Severity::Error,

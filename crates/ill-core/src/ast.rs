@@ -115,6 +115,23 @@ pub enum ComparisonOp {
     NotMatches,
 }
 
+impl std::fmt::Display for ComparisonOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ComparisonOp::Eq => "==",
+            ComparisonOp::NotEq => "!=",
+            ComparisonOp::Gt => ">",
+            ComparisonOp::Gte => ">=",
+            ComparisonOp::Lt => "<",
+            ComparisonOp::Lte => "<=",
+            ComparisonOp::Contains => "contains",
+            ComparisonOp::NotContains => "!contains",
+            ComparisonOp::Matches => "matches",
+            ComparisonOp::NotMatches => "!matches",
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Let {
     pub name: Ident,

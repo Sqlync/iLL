@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 use ill_core::ast::SourceFile;
 use ill_core::diagnostic::{Diagnostic, Severity};
 use ill_core::render;
-use ill_core::runtime::report::{StatementReport, TestReport};
+use ill_core::report_format::write_failure;
+use ill_core::runtime::report::TestReport;
 
 const ILL_EXTENSION: &str = "ill";
 
@@ -237,102 +238,15 @@ fn check_files(files: &[PathBuf]) -> CheckedSuite {
     }
 }
 
-/// Render diagnostics with a plain-text fallback if the rich renderer fails
-/// (e.g. EPIPE on stderr). Better to lose color than to silently drop the
-/// diagnostic body.
 fn render_or_fallback(path: &Path, source: &str, diags: &[Diagnostic]) {
     let mut stderr = render::stderr_writer();
-    if let Err(e) = render::render(path, source, diags, &mut stderr) {
-        eprintln!("ill: failed to render diagnostics: {e}");
-        for d in diags {
-            eprintln!("  {d}");
-        }
-    }
+    render::render_with_fallback(path, source, diags, &mut stderr);
 }
 
 fn print_failed_report(report: &TestReport, source: &str) {
-    eprintln!("FAIL {}", report.path.display());
-    for s in &report.statements {
-        match s {
-            StatementReport::ParseFailure(diags) | StatementReport::ValidationFailure(diags) => {
-                render_or_fallback(&report.path, source, diags);
-            }
-            StatementReport::ConstructFailure {
-                actor,
-                message,
-                span,
-            } => {
-                eprintln!(
-                    "  [{}..{}] construction failed for `{actor}`: {message}",
-                    span.start, span.end
-                );
-            }
-            StatementReport::CommandFailure {
-                actor,
-                command,
-                span,
-                error_fields,
-                expect,
-            } => {
-                eprintln!(
-                    "  [{}..{}] {actor}: `{command}` failed",
-                    span.start, span.end
-                );
-                for (k, v) in error_fields {
-                    eprintln!("    error.{k} = {v}");
-                }
-                if let Some(e) = expect {
-                    eprintln!("    @expect {e:?}");
-                }
-            }
-            StatementReport::CommandNotImplemented {
-                actor,
-                command,
-                span,
-            } => {
-                eprintln!(
-                    "  [{}..{}] {actor}: `{command}` has no runtime implementation",
-                    span.start, span.end
-                );
-            }
-            StatementReport::AssertFailure {
-                actor,
-                span,
-                left,
-                right,
-                op,
-                expect,
-            } => {
-                eprintln!("  [{}..{}] {actor}: assertion failed", span.start, span.end);
-                if let (Some(op), Some(right)) = (op, right) {
-                    eprintln!("    left:  {left}");
-                    eprintln!("    op:    {op:?}");
-                    eprintln!("    right: {right}");
-                } else {
-                    eprintln!("    value: {left} (not truthy)");
-                }
-                if let Some(e) = expect {
-                    eprintln!("    @expect {e:?}");
-                }
-            }
-            StatementReport::EvalError {
-                actor,
-                span,
-                message,
-            } => {
-                eprintln!("  [{}..{}] {actor}: {message}", span.start, span.end);
-            }
-        }
-    }
-    for t in &report.teardown {
-        if !t.outcome.ok {
-            eprintln!(
-                "  teardown {}: {}",
-                t.actor,
-                t.outcome.message.as_deref().unwrap_or("failed")
-            );
-        }
-    }
+    let mut stderr = render::stderr_writer();
+    // Stderr write errors leave us with no place to report them — drop.
+    let _ = write_failure(report, source, &mut stderr);
 }
 
 fn run_check(paths: &[PathBuf]) {

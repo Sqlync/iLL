@@ -4,6 +4,7 @@ pub mod diagnostic;
 pub mod lower;
 pub mod registry;
 pub mod render;
+pub mod report_format;
 pub mod runtime;
 pub mod validate;
 

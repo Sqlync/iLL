@@ -43,12 +43,16 @@ pub enum DiagnosticCode {
 
     // Squiggles
     UnknownSquiggle,
+
+    // Runtime (test execution failures rendered as diagnostics)
+    RuntimeFailure,
 }
 
 impl DiagnosticCode {
     /// Stable string form for the code, used by the renderer and (eventually)
     /// LSP `codeDescription` links. Numeric ranges are namespaced by category:
-    /// 000x parse/lower, 010x names, 020x commands, 030x types, 040x squiggles.
+    /// 000x parse/lower, 010x names, 020x commands, 030x types, 040x squiggles,
+    /// 050x runtime.
     pub fn as_str(self) -> &'static str {
         match self {
             DiagnosticCode::ParseError => "E0001",
@@ -67,6 +71,7 @@ impl DiagnosticCode {
             DiagnosticCode::ConflictingOutcomeAsserts => "E0205",
             DiagnosticCode::TypeMismatch => "E0301",
             DiagnosticCode::UnknownSquiggle => "E0401",
+            DiagnosticCode::RuntimeFailure => "E0501",
         }
     }
 }
