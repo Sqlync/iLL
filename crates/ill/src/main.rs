@@ -238,23 +238,15 @@ fn check_files(files: &[PathBuf]) -> CheckedSuite {
     }
 }
 
-/// Render diagnostics with a plain-text fallback if the rich renderer fails
-/// (e.g. EPIPE on stderr). Better to lose color than to silently drop the
-/// diagnostic body.
 fn render_or_fallback(path: &Path, source: &str, diags: &[Diagnostic]) {
     let mut stderr = render::stderr_writer();
-    if let Err(e) = render::render(path, source, diags, &mut stderr) {
-        eprintln!("ill: failed to render diagnostics: {e}");
-        for d in diags {
-            eprintln!("  {d}");
-        }
-    }
+    render::render_with_fallback(path, source, diags, &mut stderr);
 }
 
 fn print_failed_report(report: &TestReport, source: &str) {
-    let stderr = std::io::stderr();
-    let mut handle = stderr.lock();
-    let _ = write_failure(report, source, &mut handle);
+    let mut stderr = render::stderr_writer();
+    // Stderr write errors leave us with no place to report them — drop.
+    let _ = write_failure(report, source, &mut stderr);
 }
 
 fn run_check(paths: &[PathBuf]) {
