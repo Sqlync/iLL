@@ -126,7 +126,7 @@ Atoms (`:syntax_error`, `:timeout`) are leading-colon symbols — compare with `
 let alice_id = ok.row[0][0]
 ```
 
-Bindings are scoped to the file. Use them for IDs, tokens, trace headers — anything written by one statement and read by a later one. To persist across actors, use a member variable with `@mut once @access read` and assign with `self.<var> = ...` (see `examples/readme.ill`).
+Bindings are scoped to the file. Use them for IDs, tokens, trace headers — anything written by one statement and read by a later one. To persist across actors, use a member variable with `@mut once @access read` and assign with `self.<var> = ...` — see `examples/readme.ill` for the canonical pattern.
 
 ## Errors and negative tests
 
@@ -148,16 +148,30 @@ When you *don't* want squiggle validation to reject your bad input, use a plain 
 
 ## Reference examples
 
-Bundled alongside this skill (read these when you need a concrete shape):
+`examples/` (symlinked from the iLL repo's `examples/` so they're always current) — read these when you need a concrete shape:
 
-- `examples/pg_client.ill` — postgres container + client, full CRUD, error assertions.
-- `examples/exec.ill` — long-running host process; failure case.
-- `examples/container.ill` — image vs dockerfile, `external_port`, env.
-- `examples/rest.ill` — http verbs, headers, json parse, status assertions.
-- `examples/mqtt.ill` — broker container + client, pub/sub, binary payloads.
-- `examples/multi_actor.ill` — full bring-up: db + api + http user + pg verifier.
+- `examples/readme.ill` — full multi-actor bring-up: postgres container + django api + http signup + pg verification.
+- `examples/pg_client/basic.ill` — postgres client core flow: connect, query, capture, assert.
+- `examples/pg_client/assertions.ill` — every assertion operator (`==`, `contains`, `matches`, etc.) and multi-line `~sql`.
+- `examples/pg_client/connection_failures.ill` — negative connect cases and error shapes.
+- `examples/pg_client/query.ill` — query patterns beyond the basic case.
+- `examples/pg_client/row_level_security.ill` — multiple clients, role-based access patterns.
+- `examples/exec/basic.ill` — long-running host process.
+- `examples/exec/with_cwd.ill` — pointing exec at a sibling project via `cwd:`.
+- `examples/exec/failing.ill` — `:command_not_found` and other exec error shapes.
+- `examples/container/basic.ill` — `image:` form, env, port mapping.
+- `examples/container/dockerfile.ill` — building from a local `Dockerfile`.
+- `examples/container/multi_container.ill` — two containers sharing config via `@access read` vars.
+- `examples/rest/basic.ill` — http verbs, json parse, status assertions, transport-level errors.
+- `examples/rest/headers.ill` — auth flows, header round-tripping, response header assertions.
+- `examples/rest/multi_actor.ill` — multiple http clients against one api.
+- `examples/rest/connection_failures.ill` — http error shapes (`error.http.*`, `error.network.*`).
+- `examples/mqtt/basic.ill` — broker container + client, pub/sub, binary payloads via `~b` / `~hex`.
+- `examples/mqtt/qos.ill` — QoS 0/1/2 publish and subscribe.
+- `examples/mqtt/echo.ill`, `user_properties.ill`, `session_takeover.ill`, `connection_failures.ill` — narrower mqtt scenarios.
+- `examples/built-in/args.ill` — `args_actor` for parameterizing tests from the CLI.
 
-The canonical, always-up-to-date set lives in the iLL repo under `examples/`. If those exist locally and disagree with what's bundled here, prefer the repo copies.
+If you only have time to read one, read `examples/readme.ill` — it touches every actor kind in a realistic flow.
 
 ## Slash command
 
