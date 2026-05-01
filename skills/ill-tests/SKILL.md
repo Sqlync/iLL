@@ -91,17 +91,17 @@ Per-actor command quick reference:
 
 ## Squiggles
 
-Squiggles attach a meaning to a literal: `~sql\`SELECT 1\`` is a string that the validator parses as SQL. They give you syntax highlighting, validation at interpretation time, and (for some) parsing.
+Squiggles attach a meaning to a literal: ``~sql`SELECT 1` `` is a string that the validator parses as SQL. They give you syntax highlighting, validation at interpretation time, and (for some) parsing.
 
 Common squiggles:
 
-- `~sql\`...\`` — SQL statement (validated as SQL).
-- `~json\`...\`` — JSON document.
-- `~re\`...\`` — regex pattern (used with `matches` / `!matches`).
-- `~hex\`DEADBEEF\`` — base-16 byte string.
-- `~b\`hello\`` — raw bytes.
+- ``~sql`...` `` — SQL statement (validated as SQL).
+- ``~json`...` `` — JSON document.
+- ``~re`...` `` — regex pattern (used with `matches` / `!matches`).
+- ``~hex`DEADBEEF` `` — base-16 byte string.
+- ``~b`hello` `` — raw bytes.
 
-Backtick content is raw — `\.` is a literal backslash-dot, which is what you want for regex. Use `${expr}` for interpolation: `~sql\`SELECT * FROM users WHERE id = ${alice_id}\``. Squiggles can span multiple lines; indent the inner content for readability.
+Backtick content is raw — `\.` is a literal backslash-dot, which is what you want for regex. Use `${expr}` for interpolation: ``~sql`SELECT * FROM users WHERE id = ${alice_id}` ``. Squiggles can span multiple lines; indent the inner content for readability.
 
 ## Assertions
 
@@ -127,6 +127,20 @@ let alice_id = ok.row[0][0]
 ```
 
 Bindings are scoped to the file. Use them for IDs, tokens, trace headers — anything written by one statement and read by a later one. To persist across actors, use a member variable with `@mut once @access read` and assign with `self.<var> = ...` — see `examples/readme.ill` for the canonical pattern.
+
+## Parsing responses
+
+Bytes and strings come back raw — `ok.body` from `http_client` is a string, not a parsed object. Use `parse <expr> as <format>` to deserialize:
+
+```
+post "${api.base}/users",
+  body: ~json`{"name": "bob"}`
+let created = parse ok.body as json
+assert created["name"] == "bob"
+let new_id = created["id"]
+```
+
+`parse ... as json` returns a value you can index with `["key"]` (objects) or `[i]` (arrays); chain bracket access for nested fields (`user["address"]["city"]`). Use it on response bodies (`ok.body`, `error.http.body`) any time you need to assert on structure rather than the whole string.
 
 ## Errors and negative tests
 
