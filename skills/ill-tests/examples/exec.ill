@@ -1,0 +1,19 @@
+# exec reference: long-running host process + failing-exec negative test
+#
+# exec is for servers/daemons. one-shot commands aren't the intended use —
+# nothing stops you, but side effects aren't contained.
+
+actor server = exec,
+  command: "python3 -m http.server 8080"
+
+as server:
+  run
+
+# negative: command not on PATH should surface a structured error
+actor never_runs = exec,
+  command: "definitely_not_a_real_program_xyz"
+
+as never_runs:
+  run
+  assert error.type == :exec
+  assert error.exec.reason == :command_not_found

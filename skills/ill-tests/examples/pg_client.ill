@@ -1,0 +1,46 @@
+# pg_client reference: container-backed postgres + client, queries, errors
+#
+# pattern: container actor exposes its port via @access read; the client reads
+# it via `db.port`. capture results with `let`, assert on ok.row / ok.col.
+
+actor db = container,
+  image: "postgres:18"
+  internal_port: 5432
+  vars:
+    @access read
+    port: 5432
+actor alice = pg_client
+
+as db:
+  run,
+    external_port: self.port
+    env:
+      POSTGRES_USER: "root"
+      POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "test"
+
+as alice:
+  connect,
+    user: "root"
+    password: "root"
+    port: db.port
+    database: "test"
+
+  query ~sql`CREATE TABLE users (id INT, name TEXT)`
+  query ~sql`INSERT INTO users VALUES (1, 'alice'), (2, 'bob')`
+
+  # plain string (no ~sql) so the validator doesn't reject our bad input
+  query "SELEC invalid"
+  assert error.query.reason == :syntax_error
+
+  query ~sql`SELECT * FROM users ORDER BY id`
+  assert ok.row_count == 2
+  assert ok.row[0] == [1, "alice"]
+  assert ok.col["name"] == ["alice", "bob"]
+
+  # capture and reuse via interpolation
+  query ~sql`SELECT id FROM users WHERE name = 'alice'`
+  let alice_id = ok.row[0][0]
+
+  query ~sql`SELECT * FROM users WHERE id = ${alice_id}`
+  assert ok.row[0] == [1, "alice"]
