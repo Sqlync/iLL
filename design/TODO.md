@@ -5,6 +5,7 @@
 
 ## Next
 
+allow passing in args from runner outside of CLI
 
 ## Near Term
 

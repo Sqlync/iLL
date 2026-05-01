@@ -43,6 +43,25 @@ Both commands accept any mix of files and directories. Directories are searched 
 
 `ill check` reports all diagnostics (errors, warnings, hints) and exits non-zero if there are any errors. It's useful for CI linting or editor integration before a full test run.
 
+## Writing iLL tests with AI coding agents
+
+This repo ships an agent-readable language reference at [`skills/ill-tests/SKILL.md`](skills/ill-tests/SKILL.md) — actor catalog, command/mode rules, squiggles, error shapes, common diagnostics — plus a curated set of [`examples/`](examples/) that the reference points at. It's useful in any project that consumes iLL, not just this one.
+
+### Claude Code
+
+A packaged plugin with auto-triggering and a `/ill-test` slash command (runs `ill check` then `ill test`). To install from a local clone:
+
+```
+/plugin marketplace add /path/to/ill
+/plugin install ill-tests
+```
+
+The plugin lives in [`.claude-plugin/`](.claude-plugin/), [`skills/ill-tests/`](skills/ill-tests/), and [`commands/`](commands/).
+
+### Other agents (Codex, Cursor, Aider, etc.)
+
+The skill content itself is plain markdown and portable. Point your agent at [`skills/ill-tests/SKILL.md`](skills/ill-tests/SKILL.md) the way it ingests project rules — `AGENTS.md` for Codex, `.cursor/rules/` for Cursor, conventions files for Aider, or just paste it in. The frontmatter and `/ill-test` command are Claude-Code-specific and can be ignored.
+
 ## Comparison with existing systems
 
 ### Sqllogictest

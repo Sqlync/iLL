@@ -1,0 +1,7 @@
+{
+  "name": "ill-tests",
+  "version": "0.1.0",
+  "description": "Author and run integration tests written in iLL (.ill files).",
+  "homepage": "https://github.com/sqlync/ill",
+  "keywords": ["ill", "integration-testing", "sqlync"]
+}
