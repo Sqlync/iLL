@@ -2,9 +2,12 @@
 
 ## Current
 
+Support NULLs in sql results, etc.
 
 ## Next
 
+multi-line, multi-statement sql
+allow passing in args from runner outside of CLI
 
 ## Near Term
 

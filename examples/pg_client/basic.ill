@@ -25,6 +25,14 @@ as alice:
     database: "test"
     application_name: "my-app"
 
+  # basic query works
+  query ~sql`SELECT 1`
+  assert ok.row[0] == [1]
+
+  # note: "null" the name for null/none types
+  query ~sql`SELECT NULL`
+  assert ok.row[0] == [null]
+
   # create a table and insert some rows
   query ~sql`CREATE TABLE users (id INT, name TEXT)`
   query ~sql`INSERT INTO users VALUES (1, 'alice')`
