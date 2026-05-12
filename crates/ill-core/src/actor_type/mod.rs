@@ -62,6 +62,10 @@ pub enum ValueType {
     /// type is — `Dict` participates in indexing assertions like
     /// `ok.user_properties["env"]`.
     Dict,
+    /// The absent / SQL-NULL inhabitant. Source-level `null` lowers to this,
+    /// and external systems (e.g. pg_client) surface NULL columns as
+    /// `Value::Null`.
+    Null,
     /// A structured runtime value produced by parsing (json, protobuf, etc.).
     /// The shape is not statically known to the validator.
     Dynamic,

@@ -230,6 +230,7 @@ module.exports = grammar({
         $.squiggle,
         $.number,
         $.boolean,
+        $.null,
         $.atom,
         $.array,
       ),
@@ -274,6 +275,8 @@ module.exports = grammar({
     number: (_) => /-?\d+/,
 
     boolean: (_) => choice("true", "false"),
+
+    null: (_) => "null",
 
     identifier: (_) => /[a-zA-Z_][a-zA-Z0-9_-]*/,
   },

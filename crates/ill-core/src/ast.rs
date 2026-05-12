@@ -168,6 +168,7 @@ pub enum Expr {
     StringLit(StringLit),
     Number(i64),
     Bool(bool),
+    Null,
     Atom(Ident),
     Array(Vec<Expr>),
     Squiggle(Squiggle),

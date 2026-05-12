@@ -107,6 +107,10 @@
 
 (boolean) @constant.builtin
 
+; ─── Null ────────────────────────────────────────────────────────────────────
+
+(null) @constant.builtin
+
 ; ─── Brackets ────────────────────────────────────────────────────────────────
 
 (array "[" @punctuation.bracket "]" @punctuation.bracket)

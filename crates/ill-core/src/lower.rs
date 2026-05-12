@@ -611,9 +611,8 @@ impl<'a> LowerCtx<'a> {
             "member_expression" => self.lower_member_expression(node),
             "index_expression" => self.lower_index_expression(node),
             // Sometimes tree-sitter gives us the inner node directly
-            "identifier" | "string" | "number" | "boolean" | "atom" | "array" | "squiggle" => {
-                self.lower_primary(node)
-            }
+            "identifier" | "string" | "number" | "boolean" | "null" | "atom" | "array"
+            | "squiggle" => self.lower_primary(node),
             _ => {
                 if !node.is_error() && !node.is_missing() {
                     self.errors.push(Diagnostic::error(
@@ -648,6 +647,7 @@ impl<'a> LowerCtx<'a> {
                 let val = self.text(node) == "true";
                 Some(Expr::Bool(val))
             }
+            "null" => Some(Expr::Null),
             "atom" => {
                 // atom is `:` + identifier
                 Some(Expr::Atom(self.ident_from_node(node.named_child(0)?)))
@@ -1016,6 +1016,46 @@ as db:
         match scalar_rhs {
             Some(Expr::Number(n)) => assert_eq!(*n, -1),
             other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_null_literal() {
+        let source = "\
+actor db = container
+as db:
+  assert ok.row[0] == [null]
+  assert ok.value == null
+";
+        let file = lower(source).expect("null literal should lower cleanly");
+        let as_block = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                TopLevel::AsBlock(b) => Some(b),
+                _ => None,
+            })
+            .expect("expected as-block");
+
+        let array_rhs = match &as_block.body[0] {
+            Statement::Assert(a) => a.right.as_ref(),
+            _ => panic!("expected assert statement"),
+        };
+        match array_rhs {
+            Some(Expr::Array(elems)) => match &elems[0] {
+                Expr::Null => {}
+                other => panic!("expected null, got {other:?}"),
+            },
+            other => panic!("expected array, got {other:?}"),
+        }
+
+        let scalar_rhs = match &as_block.body[1] {
+            Statement::Assert(a) => a.right.as_ref(),
+            _ => panic!("expected assert statement"),
+        };
+        match scalar_rhs {
+            Some(Expr::Null) => {}
+            other => panic!("expected null, got {other:?}"),
         }
     }
 

@@ -49,6 +49,7 @@ pub fn eval(expr: &Expr, scope: &Scope) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Number(n) => Ok(Value::Number(*n)),
         Expr::Bool(b) => Ok(Value::Bool(*b)),
+        Expr::Null => Ok(Value::Null),
         Expr::Atom(ident) => Ok(Value::Atom(ident.name.clone())),
         Expr::StringLit(lit) => eval_string_lit(lit, scope),
         Expr::Ident(ident) => scope
@@ -172,6 +173,7 @@ mod tests {
         let s = Scope::new();
         assert_eq!(eval(&Expr::Number(7), &s).unwrap(), Value::Number(7));
         assert_eq!(eval(&Expr::Bool(true), &s).unwrap(), Value::Bool(true));
+        assert_eq!(eval(&Expr::Null, &s).unwrap(), Value::Null);
         assert_eq!(
             eval(&Expr::Atom(ident("on")), &s).unwrap(),
             Value::Atom("on".into())
