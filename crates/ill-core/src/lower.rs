@@ -1167,8 +1167,7 @@ as a:
         assert!(
             !errs
                 .iter()
-                .any(|d| d.code == DiagnosticCode::UnexpectedNode
-                    && d.message.contains("ERROR")),
+                .any(|d| d.code == DiagnosticCode::UnexpectedNode && d.message.contains("ERROR")),
             "leaked tree-sitter ERROR terminology as UnexpectedNode: {errs:?}"
         );
     }
@@ -1206,9 +1205,11 @@ actor a = args_actor,
         let errs = lower(source).expect_err("should fail to lower");
         let rendered: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         assert!(
-            rendered.iter().any(|s| s.contains("unknown escape sequence")
-                && s.contains("\\q")
-                && !s.contains("invalid literal")),
+            rendered
+                .iter()
+                .any(|s| s.contains("unknown escape sequence")
+                    && s.contains("\\q")
+                    && !s.contains("invalid literal")),
             "expected a clean InvalidEscape diagnostic, got: {rendered:?}"
         );
     }

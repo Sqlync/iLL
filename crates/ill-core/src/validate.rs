@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use crate::actor_type::{
     unknown_command_message, ActorType, ErrorTypeDef, KeywordArgDef, Mode, OutcomeField, ValueType,
 };
-use crate::ast::{self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel};
+use crate::ast::{
+    self, AsBlock, Expr, KeywordArg, SourceFile, Statement, StringFragment, TopLevel,
+};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::registry::Registry;
 use crate::runtime::squiggle::Registry as SquiggleRegistry;
@@ -98,7 +100,9 @@ impl<'r> Validator<'r> {
     }
 
     fn healthy_mut(&mut self, name: &str) -> Option<&mut HealthyActor> {
-        self.actors.get_mut(name).and_then(ActorState::as_healthy_mut)
+        self.actors
+            .get_mut(name)
+            .and_then(ActorState::as_healthy_mut)
     }
 
     fn run(&mut self, source: &SourceFile) {
@@ -768,7 +772,10 @@ as bob:
 ";
         assert_eq!(
             codes(&diags(src)),
-            vec![DiagnosticCode::UnknownActorType, DiagnosticCode::UnknownCommand]
+            vec![
+                DiagnosticCode::UnknownActorType,
+                DiagnosticCode::UnknownCommand
+            ]
         );
     }
 

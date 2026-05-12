@@ -147,7 +147,8 @@ fn one_bad_file_blocks_the_clean_ones() {
 
     assert_eq!(r.code, 1);
     assert!(
-        r.stderr.contains(&format!("ill: {} failed validation", bad.display())),
+        r.stderr
+            .contains(&format!("ill: {} failed validation", bad.display())),
         "stderr: {}",
         r.stderr
     );

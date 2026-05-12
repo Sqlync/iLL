@@ -290,8 +290,18 @@ subscribe_cmd!(Subscribe1, "subscribe_1", SUBSCRIBE_1);
 subscribe_cmd!(Subscribe2, "subscribe_2", SUBSCRIBE_2);
 
 publish_cmd!(Publish0, "publish_0", PUBLISH_0, PUBLISH_QOS0_ERROR_TYPES);
-publish_cmd!(Publish1, "publish_1", PUBLISH_1, NETWORK_AND_MQTT_ERROR_TYPES);
-publish_cmd!(Publish2, "publish_2", PUBLISH_2, NETWORK_AND_MQTT_ERROR_TYPES);
+publish_cmd!(
+    Publish1,
+    "publish_1",
+    PUBLISH_1,
+    NETWORK_AND_MQTT_ERROR_TYPES
+);
+publish_cmd!(
+    Publish2,
+    "publish_2",
+    PUBLISH_2,
+    NETWORK_AND_MQTT_ERROR_TYPES
+);
 
 // ── Receive: split into receive_publish / receive_disconnect ─────────────────
 //

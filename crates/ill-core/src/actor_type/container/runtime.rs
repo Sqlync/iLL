@@ -70,8 +70,7 @@ fn classify_run_error(e: &TestcontainersError) -> &'static str {
         return REASON_TIMEOUT;
     }
     let rendered = e.to_string();
-    if rendered.contains("port is already allocated")
-        || rendered.contains("address already in use")
+    if rendered.contains("port is already allocated") || rendered.contains("address already in use")
     {
         return REASON_PORT_IN_USE;
     }
@@ -293,7 +292,8 @@ impl Stopped {
         if external_port.is_some() && internal_port.is_none() {
             return (ContainerMode::Stopped(self), run_error(REASON_BAD_PORT));
         }
-        let mut req: ContainerRequest<GenericImage> = GenericImage::new(image_name, image_tag).into();
+        let mut req: ContainerRequest<GenericImage> =
+            GenericImage::new(image_name, image_tag).into();
         if let (Some(host), Some(container)) = (external_port, internal_port) {
             req = req.with_mapped_port(host, container.tcp());
         }
@@ -846,5 +846,4 @@ mod tests {
             Err(_) => panic!("expected TypeMismatch, got different RuntimeError"),
         }
     }
-
 }

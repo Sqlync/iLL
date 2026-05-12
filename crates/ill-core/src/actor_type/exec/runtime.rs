@@ -276,14 +276,8 @@ impl ActorInstance for ExecInstance {
     async fn execute(&mut self, cmd: &'static str, args: &CommandArgs) -> RunOutcome {
         let (next, outcome) = match std::mem::take(&mut self.mode) {
             ExecMode::Stopped(s) => {
-                s.execute(
-                    &self.target,
-                    &self.source_dir,
-                    &self.working_dir,
-                    cmd,
-                    args,
-                )
-                .await
+                s.execute(&self.target, &self.source_dir, &self.working_dir, cmd, args)
+                    .await
             }
             ExecMode::Running(r) => r.execute(cmd, args).await,
         };
@@ -354,11 +348,7 @@ mod tests {
     /// Build `ConstructArgs` with a `command` and an explicit `source_dir`,
     /// optionally pinning a `cwd` kwarg. The single source of truth for
     /// constructing exec-actor test args; `construct_args` delegates here.
-    fn construct_args_with(
-        target: &str,
-        source_dir: PathBuf,
-        cwd: Option<&str>,
-    ) -> ConstructArgs {
+    fn construct_args_with(target: &str, source_dir: PathBuf, cwd: Option<&str>) -> ConstructArgs {
         let mut kw = Dict::new();
         kw.insert("command".into(), Value::String(target.into()));
         if let Some(c) = cwd {

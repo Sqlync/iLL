@@ -213,7 +213,12 @@ impl Disconnected {
             Ok(c) => c,
             // The validator enforces kwarg types; this only fires if a test
             // bypasses validation. Surface as `:other` rather than panic.
-            Err(()) => return (MqttMode::Disconnected(self), mqtt_error("other", CLIENT_SIDE_REASON_CODE)),
+            Err(()) => {
+                return (
+                    MqttMode::Disconnected(self),
+                    mqtt_error("other", CLIENT_SIDE_REASON_CODE),
+                )
+            }
         };
 
         // Retry transient transport failures inside the timeout budget — same
@@ -410,9 +415,8 @@ fn connack_failure_atom(code: ConnectReturnCode) -> (&'static str, i64) {
         ConnectReturnCode::MalformedPacket => ("malformed_packet", 0x81),
         ConnectReturnCode::ProtocolError => ("protocol_error", 0x82),
         ConnectReturnCode::ImplementationSpecificError => ("implementation_specific_error", 0x83),
-        ConnectReturnCode::UnsupportedProtocolVersion | ConnectReturnCode::RefusedProtocolVersion => {
-            ("unsupported_protocol_version", 0x84)
-        }
+        ConnectReturnCode::UnsupportedProtocolVersion
+        | ConnectReturnCode::RefusedProtocolVersion => ("unsupported_protocol_version", 0x84),
         ConnectReturnCode::ClientIdentifierNotValid | ConnectReturnCode::BadClientId => {
             ("client_identifier_not_valid", 0x85)
         }
@@ -586,7 +590,10 @@ impl Connected {
         let _ = self.client.disconnect().await;
         // `Drop for Connected` aborts the event loop task once `self` falls
         // out of scope at the end of this function.
-        (MqttMode::Disconnected(Disconnected), RunOutcome::Ok(Dict::new()))
+        (
+            MqttMode::Disconnected(Disconnected),
+            RunOutcome::Ok(Dict::new()),
+        )
     }
 
     async fn teardown(self) -> (MqttMode, TeardownOutcome) {
@@ -907,11 +914,7 @@ mod tests {
             .with_exposed_port(1883.tcp())
             .with_wait_for(WaitFor::message_on_stderr("running"))
             .with_copy_to("/mosquitto/config/mosquitto.conf", MOSQUITTO_CONF.to_vec())
-            .with_cmd(vec![
-                "mosquitto",
-                "-c",
-                "/mosquitto/config/mosquitto.conf",
-            ])
+            .with_cmd(vec!["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"])
             .start()
             .await
             .expect("start mosquitto container")
@@ -1052,14 +1055,8 @@ mod tests {
                 .await,
         );
         let ok = expect_ok(inst.execute("receive_publish", &empty_args()).await);
-        assert_eq!(
-            ok.get("payload"),
-            Some(&Value::Bytes(b"hello".to_vec()))
-        );
-        assert_eq!(
-            ok.get("topic"),
-            Some(&Value::String("greetings".into()))
-        );
+        assert_eq!(ok.get("payload"), Some(&Value::Bytes(b"hello".to_vec())));
+        assert_eq!(ok.get("topic"), Some(&Value::String("greetings".into())));
         let td = inst.teardown().await;
         assert!(td.ok);
     }
@@ -1078,7 +1075,10 @@ mod tests {
             .execute("publish_0", &publish_args("", b"x".to_vec()))
             .await;
         let fields = expect_error_variant(outcome, "mqtt");
-        assert_eq!(fields.get("reason"), Some(&Value::Atom("invalid_topic".into())));
+        assert_eq!(
+            fields.get("reason"),
+            Some(&Value::Atom("invalid_topic".into()))
+        );
         assert_eq!(
             fields.get("reason_code"),
             Some(&Value::Number(CLIENT_SIDE_REASON_CODE))

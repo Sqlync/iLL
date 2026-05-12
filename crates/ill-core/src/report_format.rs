@@ -19,11 +19,7 @@ use crate::runtime::report::{StatementReport, TestReport};
 
 /// Stream a failure report to `w`. Takes `WriteColor` so terminal output keeps
 /// the same color treatment as `render::render`.
-pub fn write_failure(
-    report: &TestReport,
-    src: &str,
-    w: &mut dyn WriteColor,
-) -> io::Result<()> {
+pub fn write_failure(report: &TestReport, src: &str, w: &mut dyn WriteColor) -> io::Result<()> {
     writeln!(w, "FAIL {}", report.path.display())?;
 
     let mut diags: Vec<Diagnostic> = Vec::new();
