@@ -776,6 +776,10 @@
           "named": true
         },
         {
+          "type": "null",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -1081,6 +1085,10 @@
   {
     "type": "mut",
     "named": false
+  },
+  {
+    "type": "null",
+    "named": true
   },
   {
     "type": "number",

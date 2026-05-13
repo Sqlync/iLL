@@ -5,6 +5,9 @@
 
 ## Next
 
+Add a README in vscode-ill and link there from the main README
+multi-line, multi-statement sql
+allow passing in args from runner outside of CLI
 
 ## Near Term
 

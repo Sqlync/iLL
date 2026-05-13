@@ -54,8 +54,8 @@ impl Value {
 
     /// True if this value is a valid inhabitant of `ty`. `Dynamic` and
     /// `Unknown` are permissive (they match any runtime value); every other
-    /// variant is strict. `Array`/`Null` match no concrete `ValueType` — use
-    /// `Dynamic` to accept them.
+    /// variant is strict. `Array` matches no concrete `ValueType` — use
+    /// `Dynamic` to accept it.
     pub fn is_of_type(&self, ty: ValueType) -> bool {
         matches!(
             (ty, self),
@@ -67,6 +67,7 @@ impl Value {
                 | (ValueType::Atom, Value::Atom(_))
                 | (ValueType::Bytes, Value::Bytes(_))
                 | (ValueType::Dict, Value::Dict(_))
+                | (ValueType::Null, Value::Null)
         )
     }
 }

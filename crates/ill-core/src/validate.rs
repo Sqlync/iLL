@@ -569,7 +569,7 @@ fn for_each_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
                 for_each_expr(e, f);
             }
         }
-        Expr::Ident(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Atom(_) => {}
+        Expr::Ident(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Null | Expr::Atom(_) => {}
     }
 }
 
@@ -671,6 +671,7 @@ fn expr_type(expr: &Expr) -> ValueType {
         Expr::StringLit(_) => ValueType::String,
         Expr::Number(_) => ValueType::Number,
         Expr::Bool(_) => ValueType::Bool,
+        Expr::Null => ValueType::Null,
         Expr::Atom(_) => ValueType::Atom,
         Expr::Squiggle(squiggle) => SquiggleRegistry::global()
             .get(&squiggle.name.name)
