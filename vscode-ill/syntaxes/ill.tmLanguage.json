@@ -115,6 +115,7 @@
         { "include": "#hex-number" },
         { "include": "#number" },
         { "include": "#boolean" },
+        { "include": "#null" },
         { "include": "#comparison-operator" },
         { "include": "#builtin-identifier" },
         { "include": "#property-access" },
@@ -240,6 +241,11 @@
     "boolean": {
       "name": "constant.language.boolean.ill",
       "match": "\\b(true|false)\\b"
+    },
+
+    "null": {
+      "name": "constant.language.null.ill",
+      "match": "\\b(null)\\b"
     },
 
     "comparison-operator": {
